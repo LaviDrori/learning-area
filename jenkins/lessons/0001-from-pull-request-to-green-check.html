@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pull Request to Green Check</title>
+<link rel="stylesheet" href="../assets/course.css">
+<style>
+  .arch svg text { font-family: var(--mono); font-size: 12px; fill: var(--fg); }
+  .arch svg .lbl { font-family: var(--serif); font-style: italic; font-size: 12px; fill: var(--muted); }
+  .arch svg rect { fill: var(--panel); stroke: var(--rule); }
+  .arch svg .hl { stroke: var(--accent); stroke-width: 1.6; }
+  .arch svg line, .arch svg path { stroke: var(--accent); stroke-width: 1.4; fill: none; marker-end: url(#aj); }
+  .arch svg .back { stroke: var(--good); marker-end: url(#ajg); stroke-dasharray: 5 3; }
+  pre .c { color: var(--muted); }
+  .story { border-left: 3px solid var(--rule); padding-left: 1rem; margin: 1rem 0; }
+  .story ol { padding-left: 1.2rem; }
+</style>
+</head>
+<body><main>
+<div class="crumbs">Jenkins · Lesson 1 · <a href="../reference/glossary.html">Glossary &amp; Jenkinsfile cheat sheet</a></div>
+
+<h1>From Pull Request to Green Check</h1>
+<p class="subtitle">What actually happens behind the Jenkins status on your PR. ~25 minutes.</p>
+
+<div class="goal"><strong>Your win today:</strong> trace a pull request in one of your repos all the way to the ✓ or ✗ that Jenkins puts on it, naming every piece involved. You'll understand what DevOps means by <em>controller</em>, <em>agent</em>, <em>executor</em>, <em>queue</em>, <em>Jenkinsfile</em>, <em>multibranch</em> and <em>credential</em>.</div>
+
+<h2>0. Warm-up: guess first <span class="score"></span></h2>
+<p>You don't know these yet, and that's the point. A guess now makes the answer stick later.</p>
+<div class="quiz" data-answer="0">
+  <p class="q">You open a PR, and a few seconds later a Jenkins check appears on it. How did Jenkins find out about the PR?</p>
+  <button>GitHub sent Jenkins a message about the PR</button>
+  <button>Jenkins reads your PR notification emails each minute</button>
+  <button>You must click Build in Jenkins every time</button>
+  <p class="why">The Git host sends an HTTP message, called a <b>webhook</b>, to Jenkins the moment something happens. (Jenkins can also <em>poll</em>, checking the repo on a timer, but that's slower.) Section 3 covers this.</p>
+</div>
+<div class="quiz" data-answer="2">
+  <p class="q">Where do the instructions "lint, then test, then deploy" usually live?</p>
+  <button>Only in the heads of DevOps engineers</button>
+  <button>Inside GitHub's settings page for the repo</button>
+  <button>In a file committed alongside your code</button>
+  <p class="why">That file is the <b>Jenkinsfile</b>, usually at the root of your repo. It's the most useful thing in this lesson, and section 2 is about it.</p>
+</div>
+
+<h2>1. Jenkins is a brain plus workers</h2>
+<p>Jenkins is an automation server. It runs a list of tasks for you whenever something happens (a push, a PR, a timer). It has two kinds of parts:</p>
+<ul>
+  <li>The <b>controller</b> is the brain: "the central, coordinating process which stores configuration, loads plugins, and renders the various user interfaces"<span class="note"><a href="https://www.jenkins.io/doc/book/glossary/">jenkins.io, Glossary</a>.</span>. It's the website DevOps sends you links to. It also holds the build queue, the build history, and stored secrets.</li>
+  <li><b>Agents</b> are the workers: "typically a machine, or container, which connects to a Jenkins controller". The real work (<code>pytest</code>, <code>dbt run</code>, a deploy script) runs on agents.</li>
+  <li>Each agent has <b>executors</b>: "a slot for execution of work". An agent with 2 executors can run 2 builds at once.</li>
+  <li>Agents carry <b>labels</b>, "user-defined text for grouping Agents, typically by similar functionality or capability", such as <code>python</code> or <code>docker</code>. A pipeline asks for a label, not a specific machine.</li>
+</ul>
+<p>Why not run builds on the controller itself? The docs say running builds there "is discouraged for security, performance, and scalability reasons"<span class="note"><a href="https://www.jenkins.io/doc/book/managing/nodes/">jenkins.io, Managing Nodes</a>.</span>. The controller holds every secret, so you don't want arbitrary build code running next to them.</p>
+
+<figure class="arch">
+<svg viewBox="0 0 640 230" role="img" aria-label="GitHub sends a webhook to the Jenkins controller. The controller queues the build and dispatches it to an executor on an agent with a matching label. The agent runs the steps in a workspace. The result goes back to the PR as a status.">
+  <defs>
+    <marker id="aj" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)" stroke="none"/></marker>
+    <marker id="ajg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--good)" stroke="none"/></marker>
+  </defs>
+  <rect x="10" y="40" width="140" height="70" rx="5"/>
+  <text x="80" y="64" text-anchor="middle">GitHub repo</text><text x="80" y="82" text-anchor="middle" font-size="10">code + Jenkinsfile</text><text x="80" y="98" text-anchor="middle" font-size="10">PR #42</text>
+  <rect class="hl" x="220" y="20" width="180" height="110" rx="6"/>
+  <text x="310" y="42" text-anchor="middle">Jenkins controller</text>
+  <text x="310" y="64" text-anchor="middle" font-size="10">config · plugins · UI</text>
+  <text x="310" y="80" text-anchor="middle" font-size="10">credentials (encrypted)</text>
+  <text x="310" y="96" text-anchor="middle" font-size="10">build queue · history</text>
+  <text x="310" y="118" text-anchor="middle" font-size="10" fill="var(--muted)">runs no builds itself</text>
+  <rect x="470" y="10" width="160" height="80" rx="5"/>
+  <text x="550" y="32" text-anchor="middle">agent  [python]</text>
+  <text x="550" y="52" text-anchor="middle" font-size="10">executor 1: busy</text><text x="550" y="68" text-anchor="middle" font-size="10">executor 2: free</text>
+  <rect x="470" y="110" width="160" height="60" rx="5"/>
+  <text x="550" y="134" text-anchor="middle">agent  [docker]</text><text x="550" y="152" text-anchor="middle" font-size="10">executor 1: free</text>
+  <line x1="152" y1="62" x2="218" y2="62"/><text class="lbl" x="160" y="54">webhook</text>
+  <line x1="402" y1="60" x2="468" y2="60"/><text class="lbl" x="408" y="52">dispatch</text>
+  <path class="back" d="M550,92 C550,200 140,210 80,112"/><text class="lbl" x="230" y="205" fill="var(--good)">✓ / ✗ status back on PR #42</text>
+</svg>
+<figcaption>The controller decides; agents do. The ✓/✗ you see on a PR is the end of this loop. Strictly, the controller reports the status after the agent finishes.</figcaption>
+</figure>
+
+<h2>2. The Jenkinsfile: the pipeline lives in your repo</h2>
+<p>"The definition of a Jenkins Pipeline is written into a text file (called a Jenkinsfile)" which "can be committed to the project's repository". Jenkins calls this <b>Pipeline-as-code</b>. The delivery process becomes "part of the application to be versioned and reviewed like any other code"<span class="note"><a href="https://www.jenkins.io/doc/book/pipeline/">jenkins.io, Pipeline</a>. The same page calls committing it "generally considered best practice".</span>.</p>
+<p>That's good news for you: <b>a pipeline change is a PR you can review</b>, and its Git history is the audit trail. Here's a realistic Jenkinsfile for a DE repo, <code>orders-etl</code>. It uses the <b>Declarative</b> style, the newer and more readable of the two styles, built to make Pipeline code "easier" to write and read.</p>
+<pre>pipeline {
+    agent { label 'python' }          <span class="c">// WHERE: any agent labelled "python"</span>
+    environment {
+        DWH_TOKEN = credentials('dwh-staging-token')  <span class="c">// secret fetched by ID, never in Git</span>
+    }
+    stages {
+        stage('Lint') {
+            steps { sh 'ruff check .' }
+        }
+        stage('Test') {
+            steps { sh 'pytest --junitxml=reports/unit.xml' }
+        }
+        stage('Deploy to staging') {
+            when { branch 'main' }        <span class="c">// only after merge, skipped on PRs</span>
+            steps { sh './deploy.sh staging' }
+        }
+    }
+    post {
+        always  { junit 'reports/*.xml' }   <span class="c">// publish test results, pass or fail</span>
+        failure { echo 'Notify the team here' }
+    }
+}</pre>
+<table>
+<tr><th>Block</th><th>Plain meaning</th></tr>
+<tr><td><code>agent</code></td><td>"Specifies where the entire Pipeline, or a specific stage, will execute"</td></tr>
+<tr><td><code>stage</code></td><td>"A conceptually distinct subset of tasks". These are the boxes you see in the build UI.</td></tr>
+<tr><td><code>steps</code> / <code>sh</code></td><td>A step is "a single task". <code>sh</code> runs a shell command on the agent.</td></tr>
+<tr><td><code>when</code></td><td>Run this stage only if a condition holds. <code>branch</code> only works in a multibranch pipeline (next section).</td></tr>
+<tr><td><code>credentials()</code></td><td>Pulls a stored secret into an environment variable <em>by its ID</em></td></tr>
+<tr><td><code>post</code></td><td>Steps that run after the pipeline finishes, grouped by result: <code>always</code>, <code>success</code>, <code>failure</code>, <code>unstable</code>, <code>changed</code></td></tr>
+</table>
+<p class="note">Quotes: <a href="https://www.jenkins.io/doc/book/pipeline/syntax/">jenkins.io, Pipeline Syntax</a> and <a href="https://www.jenkins.io/doc/book/pipeline/">Pipeline</a>. The file is a simplified sketch, not your team's real one.</p>
+<div class="callout"><b>Secrets never live in the Jenkinsfile.</b> Credentials "are stored in an encrypted form on the controller" and pipelines handle them "only … via their credential IDs"<span class="note"><a href="https://www.jenkins.io/doc/book/using/using-credentials/">jenkins.io, Using credentials</a>.</span>. When DevOps says "add the credential and send me the ID", this is what they mean.</div>
+
+<h2>3. How the repo and Jenkins are wired</h2>
+<p>Most teams use a <b>Multibranch Pipeline</b>, one Jenkins job per repo. Jenkins finds every branch that contains a Jenkinsfile and creates a pipeline for each, and with the right plugin it does the same for pull requests<span class="note"><a href="https://www.jenkins.io/doc/book/pipeline/multibranch/">jenkins.io, Branches and Pull Requests</a>. PR support comes from "branch source" plugins (GitHub, Bitbucket, GitLab, Gitea).</span>. Inside the build, two variables tell the pipeline what it's building: <code>BRANCH_NAME</code> (e.g. <code>main</code>) and <code>CHANGE_ID</code> ("such as a pull request number").</p>
+<p>Click through one PR's journey. Before each hop, predict what happens next.</p>
+<div id="flow"></div>
+<p class="note">Webhook endpoint and commit statuses: <a href="https://plugins.jenkins.io/github/">GitHub plugin</a>. Branch scanning: <a href="https://www.jenkins.io/doc/book/pipeline/multibranch/">Branches and Pull Requests</a>. GitHub is used as the example. Bitbucket and GitLab work the same way through their own plugins.</p>
+
+<h2>4. Three ways your pipeline gets started</h2>
+<table>
+<tr><th>Trigger</th><th>What starts it</th><th>Typical DE use</th></tr>
+<tr><td><b>PR / push</b></td><td>Webhook from the Git host</td><td>Lint, unit tests, SQL checks. Gives you the ✓/✗ on the PR.</td></tr>
+<tr><td><b>Merge to main</b></td><td>Webhook (a push to <code>main</code>), with stages gated by <code>when { branch 'main' }</code></td><td>Deploy code, jobs or DAGs to staging or prod</td></tr>
+<tr><td><b>Schedule</b></td><td><code>triggers { cron('H 2 * * *') }</code></td><td>Nightly data jobs, regular refreshes</td></tr>
+</table>
+<p>On schedules, the docs ask for <code>H</code> (for "hash") "wherever possible". Instead of every job starting at exactly 02:00, <code>H</code> picks a minute derived from the job's name. Each job gets a stable time, and the load is spread out<span class="note"><a href="https://www.jenkins.io/doc/book/pipeline/syntax/#cron-syntax">Pipeline Syntax, cron</a>.</span>.</p>
+<p>A connection to your <a href="../../kubernetes/lessons/0003-from-git-push-to-running-pod.html">Kubernetes Lesson 3</a>: Jenkins is the classic <b>push-style</b> deployer. The CI system itself holds the credentials and pushes changes to the target.</p>
+
+<h2>5. Translating DevOps talk</h2>
+<table>
+<tr><th>They say…</th><th>What's actually happening</th></tr>
+<tr><td>"It's stuck in the queue"</td><td>The build is waiting for a free <b>executor</b> on an agent with the requested <b>label</b>. Nothing is broken yet.</td></tr>
+<tr><td>"The agent went offline"</td><td>A worker machine/container lost its connection to the controller. Builds needing that label wait or fail.</td></tr>
+<tr><td>"Re-scan the multibranch"</td><td>Tell Jenkins to look at the repo again and discover new or deleted branches and PRs</td></tr>
+<tr><td>"Add the credential, use the ID"</td><td>Store the secret on the controller, then reference it with <code>credentials('id')</code></td></tr>
+<tr><td>"Check the console output"</td><td>The full log of the build: every command each step ran, and its output. (Lesson 3 is about reading it.)</td></tr>
+<tr><td>"It's a downstream job"</td><td>A job "triggered as part of the execution of a separate Pipeline or Job", e.g. tests pass and a deploy job starts</td></tr>
+</table>
+
+<h2>6. Day-to-day stories</h2>
+<div class="story">
+<h3>Story A: a normal PR on <code>orders-etl</code></h3>
+<ol>
+  <li>You push branch <code>feature/dedupe</code> and open PR #42.</li>
+  <li>The webhook fires. Jenkins builds the PR, runs Lint and Test, and <em>skips</em> "Deploy to staging" (it isn't <code>main</code>).</li>
+  <li>A test fails. The PR shows ✗. You click <em>Details</em>, land on the Jenkins build, open the failing stage's log, and find your bug.</li>
+  <li>You push a fix, a new build runs automatically, and the PR goes ✓.</li>
+</ol>
+</div>
+<div class="story">
+<h3>Story B: merge day</h3>
+<p>The PR merges. That's a push to <code>main</code>, so Jenkins builds <code>main</code>, and this time "Deploy to staging" runs, using <code>DWH_TOKEN</code> from the controller's credential store. Nobody pasted a password anywhere.</p>
+</div>
+<div class="story">
+<h3>Story C: "your build has been yellow for an hour"</h3>
+<p>Your build sits there with no stage started. DevOps: "it's queued, the <code>python</code> agents are all busy." Translation: there are more builds than executors with that label. A fair <b>suggestion</b> you could now make: "Could we add executors or agents for the <code>python</code> label, or shorten our test stage?"</p>
+</div>
+
+<hr>
+
+<h2>7. Check yourself <span class="score"></span></h2>
+
+<div class="quiz" data-answer="0">
+  <p class="q">Your PR build on <code>orders-etl</code> is green, but "Deploy to staging" shows as <em>skipped</em>. Why?</p>
+  <button>Its when condition only matches the main branch</button>
+  <button>Jenkins only deploys code carrying a release tag</button>
+  <button>The agent had no free executor for it</button>
+  <p class="why"><code>when { branch 'main' }</code> skips the stage on every other branch and PR. That's by design: PRs get tested, and only merged code gets deployed. (No free executor would leave the whole build <em>queued</em>, not one stage skipped.)</p>
+</div>
+
+<div class="quiz" data-answer="1">
+  <p class="q">DevOps: "Your build isn't failing, it's just stuck in the queue." What does that mean?</p>
+  <button>Your Jenkinsfile has a syntax error near the top</button>
+  <button>No executor on a matching agent is free yet</button>
+  <button>GitHub has not yet sent the webhook to Jenkins</button>
+  <p class="why">The queue holds builds waiting for an executor slot on an agent with the right label. Without a webhook there would be no build at all, and a syntax error makes the build <em>fail</em>, not wait.</p>
+</div>
+
+<div class="quiz" data-answer="2">
+  <p class="q">You pushed a new branch with a Jenkinsfile, but no job appears for it. DevOps says "re-scan the multibranch." Why would that help?</p>
+  <button>Scanning restarts the controller and clears its queue</button>
+  <button>Scanning copies your secrets onto the build agents</button>
+  <button>Scanning finds new branches that hold a Jenkinsfile</button>
+  <p class="why">A Multibranch Pipeline creates jobs for the branches it <em>discovers</em>. If the webhook was missed (or isn't set up), a scan finds the new branch. The docs note Jenkins won't re-index on its own by default unless periodic scanning is configured.</p>
+</div>
+
+<div class="quiz" data-answer="0">
+  <p class="q">A teammate wants to paste the warehouse password into the Jenkinsfile "so it's easy." What do you suggest?</p>
+  <button>Store it as a Jenkins credential, reference its ID</button>
+  <button>Put it in the repo README for easy access</button>
+  <button>Encode it with base64 first, and then commit it</button>
+  <p class="why">Credentials are stored encrypted on the controller and referenced by ID, e.g. <code>credentials('dwh-staging-token')</code>. Base64 is encoding, not encryption. Anyone can decode it, and Git keeps it forever.</p>
+</div>
+
+<div class="quiz" data-answer="1">
+  <p class="q">Where does <code>sh 'pytest'</code> in your Jenkinsfile actually run?</p>
+  <button>On the controller, inside the main Jenkins process</button>
+  <button>On an agent, inside that build's workspace directory</button>
+  <button>On GitHub's servers, right after the webhook fires</button>
+  <p class="why">Steps run on the agent picked by <code>agent { label … }</code>, in a <b>workspace</b>: "a disposable directory on the file system of a Node". Running builds on the controller is discouraged for security reasons.</p>
+</div>
+
+<div class="quiz" data-answer="2">
+  <p class="q">Last month someone changed the pipeline and deploys broke. You want to know who changed what, and when. Where do you look?</p>
+  <button>The agent's workspace folder from last month</button>
+  <button>The webhook settings page in your GitHub</button>
+  <button>The Git history of the Jenkinsfile itself</button>
+  <p class="why">That's the point of pipeline-as-code: the docs list an "audit trail for the Pipeline" as a benefit. <code>git log -p Jenkinsfile</code> shows every change and its author. Workspaces are disposable.</p>
+</div>
+
+<div class="quiz" data-answer="1">
+  <p class="q">A nightly job uses <code>cron('H 2 * * *')</code>. What does the <code>H</code> do?</p>
+  <button>Picks a new random minute each and every night</button>
+  <button>Picks a fixed minute derived from the job's name</button>
+  <button>Runs the job hourly instead of once per day</button>
+  <p class="why"><code>H</code> is a hash of the job name, so it's stable for that job, not random each night. It runs once between 02:00 and 02:59, spreading jobs out so they don't all hit the agents at 02:00.</p>
+</div>
+
+<hr>
+
+<div class="callout source"><b>Primary source, read this next (~15 min):</b> <a href="https://www.jenkins.io/doc/book/pipeline/">jenkins.io, Pipeline</a>. Read "What is Jenkins Pipeline?", "Why Pipeline?" and "Pipeline concepts". Compressed version: the <a href="../reference/glossary.html">glossary &amp; Jenkinsfile cheat sheet</a>.</div>
+
+<div class="callout ask"><b>Questions? Ask me.</b> For example: <em>"how is this different from GitHub Actions?"</em>, <em>"what's a shared library?"</em>, or <em>"why would DevOps run agents as containers?"</em> <b>Best homework:</b> find out whether your repos have a <code>Jenkinsfile</code> at the root. If they do, share one (secrets removed) and Lesson 2 will walk through <em>your real pipeline</em> line by line. Also worth checking: is your Git host GitHub, Bitbucket or GitLab?</div>
+
+<div class="next"><span></span><span>Next: Reading your team's Jenkinsfile →</span></div>
+</main>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/flow-stepper.js"></script>
+<script>
+FlowStepper.mount(document.getElementById("flow"), [
+  { title: "open a PR", who: "You · orders-etl on GitHub",
+    what: "You push <code>feature/dedupe</code> and open PR #42. The branch contains your code <em>and</em> the <code>Jenkinsfile</code>. Jenkins doesn't know anything yet.",
+    artifact: "PR #42  feature/dedupe → main" },
+  { title: "webhook", who: "GitHub → Jenkins controller",
+    what: "GitHub sends an HTTP POST, a <b>webhook</b>, to the controller. There's one endpoint for all repos, and Jenkins works out which jobs the event belongs to.",
+    artifact: "POST https://jenkins.yourco.internal/github-webhook/",
+    ask: "\"Webhooks aren't reaching Jenkins, so trigger a scan manually for now.\"" },
+  { title: "multibranch picks it up", who: "Jenkins controller",
+    what: "The repo's <b>Multibranch Pipeline</b> sees a new PR that contains a Jenkinsfile, so it creates (or reuses) an item for it and starts a <b>build</b>, one numbered run. Inside it, <code>CHANGE_ID=42</code>. Jenkins reads the Jenkinsfile <em>from your branch</em>, so a pipeline change in your PR is tested by your PR.",
+    artifact: "orders-etl » PR-42 » build #1",
+    ask: "\"Re-scan the multibranch, the new branch isn't showing.\"" },
+  { title: "queue", who: "Jenkins controller",
+    what: "The Jenkinsfile says <code>agent { label 'python' }</code>. The build waits in the <b>queue</b> until an <b>executor</b> on an agent with that label is free.",
+    artifact: "Waiting for next available executor on 'python'",
+    ask: "\"It's not failing, it's just queued.\"" },
+  { title: "agent runs the stages", who: "Agent [python] · executor 2",
+    what: "The agent checks out your branch into a <b>workspace</b>, a disposable directory, and runs the stages in order: Lint, Test. Deploy is <em>skipped</em> because <code>when { branch 'main' }</code> is false for a PR. Every line of output goes to the <b>console log</b>.",
+    artifact: "[Test] + pytest --junitxml=reports/unit.xml",
+    ask: "\"Check the console output for the Test stage.\"" },
+  { title: "status back to the PR", who: "Jenkins controller → GitHub",
+    what: "When the build finishes, Jenkins reports the result to GitHub as a <b>commit status</b>. That's your ✓ or ✗. Its <em>Details</em> link goes to this build's page in Jenkins.",
+    artifact: "✓ continuous-integration/jenkins/…  (status on PR #42)",
+    ask: "\"Make the Jenkins check required before merging.\"" },
+  { title: "merge → deploy", who: "You → GitHub → Jenkins",
+    what: "After review you merge. That's a push to <code>main</code>, so another webhook arrives, the <code>main</code> branch job builds, and this time <b>Deploy to staging</b> runs, using the <code>dwh-staging-token</code> credential from the controller.",
+    artifact: "orders-etl » main » build #57  ·  Deploy to staging ✓" },
+], "DevOps might say");
+</script>
+</body></html>

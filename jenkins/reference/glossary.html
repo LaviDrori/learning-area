@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jenkins Glossary</title>
+<link rel="stylesheet" href="../assets/course.css">
+<style> pre .c { color: var(--muted); } td:first-child { white-space: nowrap; font-weight: 600; } ol.hops li { margin: .3rem 0; } </style>
+</head>
+<body><main>
+<div class="crumbs">Lessons: <a href="../lessons/0001-from-pull-request-to-green-check.html">1</a></div>
+<h1>Jenkins Glossary &amp; Cheat Sheet</h1>
+<p class="subtitle">Terms as the official docs define them. Sources: <a href="https://www.jenkins.io/doc/book/glossary/">Glossary</a> · <a href="https://www.jenkins.io/doc/book/pipeline/syntax/">Pipeline Syntax</a> · <a href="https://www.jenkins.io/doc/book/pipeline/multibranch/">Multibranch</a>.</p>
+
+<h2>PR to ✓, in six hops</h2>
+<ol class="hops">
+  <li>You push / open a PR (code + <b>Jenkinsfile</b>)</li>
+  <li>Git host sends a <b>webhook</b> to the controller (<code>/github-webhook/</code> for GitHub)</li>
+  <li><b>Multibranch Pipeline</b> matches the branch/PR and starts a <b>build</b></li>
+  <li>Build waits in the <b>queue</b> for a free <b>executor</b> on an agent with the right <b>label</b></li>
+  <li><b>Agent</b> checks out into a <b>workspace</b> and runs the <b>stages</b>/<b>steps</b></li>
+  <li>Controller reports a <b>commit status</b> (✓/✗) back to the PR</li>
+</ol>
+
+<h2>Terms</h2>
+<table>
+<tr><th>Term</th><th>Meaning</th></tr>
+<tr><td>Controller</td><td>The central process: stores configuration, loads plugins, serves the UI. Holds the queue, history, credentials. Shouldn't run builds itself.</td></tr>
+<tr><td>Agent</td><td>A machine or container that connects to the controller and runs the actual work</td></tr>
+<tr><td>Node</td><td>Any machine capable of executing pipelines or jobs</td></tr>
+<tr><td>Executor</td><td>A slot for running one piece of work on a node. 2 executors = 2 concurrent builds.</td></tr>
+<tr><td>Label</td><td>Text grouping agents by capability (<code>python</code>, <code>docker</code>); pipelines request a label</td></tr>
+<tr><td>Queue</td><td>Builds waiting for a free matching executor</td></tr>
+<tr><td>Job / Item</td><td>A configured description of work. "Project" is a deprecated synonym.</td></tr>
+<tr><td>Build</td><td>The result of a single execution of a job (build #57)</td></tr>
+<tr><td>Pipeline</td><td>A user-defined model of a CD pipeline, usually written in a Jenkinsfile</td></tr>
+<tr><td>Jenkinsfile</td><td>The text file in your repo that defines the pipeline ("pipeline-as-code")</td></tr>
+<tr><td>Declarative / Scripted</td><td>The two Jenkinsfile syntaxes. Declarative (<code>pipeline { … }</code>) is the more readable one.</td></tr>
+<tr><td>Stage</td><td>A conceptually distinct part of the pipeline (Lint, Test, Deploy), shown as a box in the UI</td></tr>
+<tr><td>Step</td><td>A single task, e.g. <code>sh 'pytest'</code></td></tr>
+<tr><td>Workspace</td><td>A disposable directory on a node where a build works</td></tr>
+<tr><td>Artifact</td><td>An immutable file produced by a build and archived on the controller</td></tr>
+<tr><td>Multibranch Pipeline</td><td>One job per repo, which auto-creates a pipeline per branch/PR containing a Jenkinsfile</td></tr>
+<tr><td>Scan / re-index</td><td>Multibranch looking at the repo again to discover new or removed branches and PRs</td></tr>
+<tr><td>Organization Folder</td><td>Watches a whole GitHub/Bitbucket/GitLab org and creates multibranch jobs per repo</td></tr>
+<tr><td>Webhook</td><td>HTTP message from the Git host telling Jenkins something happened</td></tr>
+<tr><td>Commit status</td><td>The ✓/✗ Jenkins reports back on a commit/PR</td></tr>
+<tr><td>Credential</td><td>A secret stored encrypted on the controller and referenced by ID</td></tr>
+<tr><td>Plugin</td><td>An extension to Jenkins core (Git, GitHub, credentials… nearly everything is a plugin)</td></tr>
+<tr><td>Upstream / Downstream</td><td>A job that triggers another / the job that gets triggered</td></tr>
+<tr><td>Console output</td><td>The full log of a build</td></tr>
+</table>
+
+<h2>Declarative Jenkinsfile anatomy</h2>
+<pre>pipeline {
+  agent { label 'python' }            <span class="c">// where it runs</span>
+  triggers { cron('H 2 * * *') }      <span class="c">// optional schedule; H = stable per-job minute</span>
+  parameters { string(name: 'ENV', defaultValue: 'staging') }  <span class="c">// asked on manual run → params.ENV</span>
+  environment { TOKEN = credentials('my-id') }  <span class="c">// secret by ID</span>
+  stages {
+    stage('Test')   { steps { sh 'pytest' } }
+    stage('Deploy') {
+      when { branch 'main' }          <span class="c">// multibranch only; also: changeRequest()</span>
+      input { message 'Deploy?' }     <span class="c">// pause for human approval</span>
+      steps { sh './deploy.sh' }
+    }
+  }
+  post { always { … }  success { … }  failure { … }  unstable { … }  changed { … } }
+}</pre>
+
+<h2>Useful built-in variables (multibranch)</h2>
+<table>
+<tr><td><code>BRANCH_NAME</code></td><td>Branch being built, e.g. <code>main</code></td></tr>
+<tr><td><code>CHANGE_ID</code></td><td>The change request ID, e.g. a pull request number</td></tr>
+</table>
+</main></body></html>
