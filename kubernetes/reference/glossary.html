@@ -6,7 +6,7 @@
 <link rel="stylesheet" href="../assets/course.css">
 </head>
 <body><main>
-<div class="crumbs">Lessons: <a href="../lessons/0001-desired-state-and-the-control-loop.html">1</a> · <a href="../lessons/0002-reading-a-deployment-manifest.html">2</a> · Reference: <a href="deployment-manifest.html">Deployment cheat sheet</a></div>
+<div class="crumbs">Lessons: <a href="../lessons/0001-desired-state-and-the-control-loop.html">1</a> · <a href="../lessons/0002-reading-a-deployment-manifest.html">2</a> · <a href="../lessons/0003-from-git-push-to-running-pod.html">3</a> · Reference: <a href="deployment-manifest.html">Deployment</a> · <a href="git-to-pod.html">Git-to-pod</a></div>
 <h1>Glossary</h1>
 <p class="subtitle">The course's single source of truth for terms. Lessons use these words exactly as defined here. Definitions are quoted or adapted from <a href="https://kubernetes.io/docs/reference/glossary/">kubernetes.io</a>.</p>
 
@@ -37,6 +37,21 @@
 <tr><td><b>Rollout</b></td><td>Replacing pods with ones from a new template: a new ReplicaSet scales up while the old one scales to 0.</td><td><a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#updating-a-deployment">docs</a> · L2</td></tr>
 <tr><td><b>Label</b></td><td>Key/value pair attached to an object, e.g. <code>app: nginx</code>. Not unique; many objects share labels.</td><td><a href="https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/">docs</a> · L2</td></tr>
 <tr><td><b>Label selector</b></td><td>A query over labels that picks a set of objects. "The core grouping primitive." A Deployment's selector must match its template labels and is immutable.</td><td><a href="https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/">docs</a> · L2</td></tr>
+</table>
+
+<h2>Build &amp; delivery</h2>
+<table>
+<tr><th>Term</th><th>Meaning</th><th>From</th></tr>
+<tr><td><b>Container registry</b></td><td>Server that stores and serves images (ghcr.io, Docker Hub, cloud registries, a customer's private one). Sits between build and run.</td><td><a href="https://kubernetes.io/docs/concepts/containers/images/">docs</a> · L3</td></tr>
+<tr><td><b>Image tag</b></td><td>Human-readable version label after <code>:</code>, e.g. <code>v1.4.1</code>. Can be moved to a different image.</td><td><a href="https://kubernetes.io/docs/concepts/containers/images/">docs</a> · L3</td></tr>
+<tr><td><b>Image digest</b></td><td><code>@sha256:…</code>, a hash of the image's content. Immutable.</td><td><a href="https://kubernetes.io/docs/concepts/containers/images/">docs</a> · L3</td></tr>
+<tr><td><b>imagePullPolicy</b></td><td>When the kubelet pulls: <code>IfNotPresent</code> (default for real tags and digests) or <code>Always</code> (default for <code>:latest</code> or no tag).</td><td><a href="https://kubernetes.io/docs/concepts/containers/images/#imagepullpolicy-defaulting">docs</a> · L3</td></tr>
+<tr><td><b>imagePullSecrets</b></td><td>Pod-spec field naming a Secret with credentials for a private registry.</td><td><a href="https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/">docs</a> · L3</td></tr>
+<tr><td><b>ImagePullBackOff</b></td><td>Container can't start because its image can't be pulled (wrong name/tag, missing pull secret, unreachable registry). Retries with growing delay.</td><td><a href="https://kubernetes.io/docs/concepts/containers/images/#imagepullbackoff">docs</a> · L3</td></tr>
+<tr><td><b>CI</b></td><td>Continuous integration: an automated pipeline (e.g. GitHub Actions) that builds, tests and pushes images on each push/tag.</td><td>L3</td></tr>
+<tr><td><b>App repo vs config repo</b></td><td>App repo = code + Dockerfile (yours). Config repo = manifests for deploying (often the customer's).</td><td>L3</td></tr>
+<tr><td><b>GitOps</b></td><td>Desired state lives in a Git repo; an in-cluster tool continuously syncs the cluster to it. A control loop with Git as the thermostat setting.</td><td><a href="https://argo-cd.readthedocs.io/en/stable/">Argo CD</a> · L3</td></tr>
+<tr><td><b>Argo CD / OutOfSync</b></td><td>"A declarative, GitOps continuous delivery tool for Kubernetes." <code>OutOfSync</code> = live state deviates from Git.</td><td><a href="https://argo-cd.readthedocs.io/en/stable/">Argo CD</a> · L3</td></tr>
 </table>
 
 <h2>Control plane, the brain</h2>
