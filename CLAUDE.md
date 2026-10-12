@@ -14,6 +14,15 @@ This is a general learning space, not tied to one topic. All current and future 
 - `assets/` is per topic, not shared. A new topic copies the components it needs (at least `course.css` and `quiz.js`) from an existing topic and gives `course.css` its own `--accent` colour. Topics may diverge after that. Don't make one topic's lessons load another topic's assets.
 - Paths inside a topic stay relative (`../assets/…`, `../reference/…`). Cross-topic links are fine for lessons and references only: `../../<topic>/lessons/…`.
 
+## Every file is explained line by line
+
+Lavi wants to understand every command and value in any file shown to them (YAML, Dockerfile, Jenkinsfile, CI workflows, config). Applies to every topic.
+
+- In lessons, show such files with the topic's `assets/yaml-explain.js` widget, not a bare `<pre>`, and give a note to **every** line that carries a key, value or command. Only pure closing braces/brackets may stay unannotated. A topic without the widget copies it from `kubernetes/assets/`.
+- Each note says what the line does and what each value or flag in it means (e.g. `--no-cache-dir`, `0.0.0.0`, `${{ github.ref_name }}`), not just the key name.
+- Reference cheat sheets stay compact: one inline comment per line in the `<pre>`.
+- In chat answers, follow any shared file with a line-by-line explanation.
+
 ## Housekeeping
 
 - When adding a lesson or a topic, update the Topics table in the root `README.md` (lesson count, start link).

@@ -18,7 +18,7 @@
 <h2>The manifest, annotated</h2>
 <pre>apiVersion: apps/v1            <span class="c"># API group/version</span>
 kind: Deployment               <span class="c"># which object (and so which controller)</span>
-metadata:
+metadata:                      <span class="c"># the Deployment's identity</span>
   name: nginx-deployment       <span class="c"># prefix of every ReplicaSet and Pod name</span>
   labels: {app: nginx}         <span class="c"># labels on the Deployment itself (not the selector's target)</span>
 spec:                          <span class="c"># ── Deployment's desired state ──</span>
@@ -29,10 +29,10 @@ spec:                          <span class="c"># ── Deployment's desired sta
     metadata:
       labels: {app: nginx}     <span class="c"># stamped on every pod (+ pod-template-hash)</span>
     spec:                      <span class="c"># ── each Pod's spec ──</span>
-      containers:
-      - name: nginx
+      containers:                <span class="c"># list of containers in each Pod</span>
+      - name: nginx              <span class="c"># container name (kubectl logs -c)</span>
         image: nginx:1.14.2    <span class="c"># repository:tag</span>
-        ports:
+        ports:                   <span class="c"># list of listening ports</span>
         - containerPort: 80    <span class="c"># port the app listens on</span></pre>
 
 <h2>Decoding a pod name</h2>

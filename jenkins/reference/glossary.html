@@ -51,19 +51,20 @@
 </table>
 
 <h2>Declarative Jenkinsfile anatomy</h2>
-<pre>pipeline {
+<pre>pipeline {                            <span class="c">// outer block of a Declarative pipeline</span>
   agent { label 'python' }            <span class="c">// where it runs</span>
   triggers { cron('H 2 * * *') }      <span class="c">// optional schedule; H = stable per-job minute</span>
   parameters { string(name: 'ENV', defaultValue: 'staging') }  <span class="c">// asked on manual run → params.ENV</span>
   environment { TOKEN = credentials('my-id') }  <span class="c">// secret by ID</span>
-  stages {
-    stage('Test')   { steps { sh 'pytest' } }
+  stages {                            <span class="c">// ordered; first failure stops the rest</span>
+    stage('Test')   { steps { sh 'pytest' } }  <span class="c">// named box in the UI; sh = shell command</span>
     stage('Deploy') {
       when { branch 'main' }          <span class="c">// multibranch only; also: changeRequest()</span>
       input { message 'Deploy?' }     <span class="c">// pause for human approval</span>
-      steps { sh './deploy.sh' }
+      steps { sh './deploy.sh' }        <span class="c">// the actual work</span>
     }
   }
+  <span class="c">// post: runs after all stages, one block per outcome</span>
   post { always { … }  success { … }  failure { … }  unstable { … }  changed { … } }
 }</pre>
 

@@ -80,28 +80,8 @@
 <h2>2. The Jenkinsfile: the pipeline lives in your repo</h2>
 <p>"The definition of a Jenkins Pipeline is written into a text file (called a Jenkinsfile)" which "can be committed to the project's repository". Jenkins calls this <b>Pipeline-as-code</b>. The delivery process becomes "part of the application to be versioned and reviewed like any other code"<span class="note"><a href="https://www.jenkins.io/doc/book/pipeline/">jenkins.io, Pipeline</a>. The same page calls committing it "generally considered best practice".</span>.</p>
 <p>That's good news for you: <b>a pipeline change is a PR you can review</b>, and its Git history is the audit trail. Here's a realistic Jenkinsfile for a DE repo, <code>orders-etl</code>. It uses the <b>Declarative</b> style, the newer and more readable of the two styles, built to make Pipeline code "easier" to write and read.</p>
-<pre>pipeline {
-    agent { label 'python' }          <span class="c">// WHERE: any agent labelled "python"</span>
-    environment {
-        DWH_TOKEN = credentials('dwh-staging-token')  <span class="c">// secret fetched by ID, never in Git</span>
-    }
-    stages {
-        stage('Lint') {
-            steps { sh 'ruff check .' }
-        }
-        stage('Test') {
-            steps { sh 'pytest --junitxml=reports/unit.xml' }
-        }
-        stage('Deploy to staging') {
-            when { branch 'main' }        <span class="c">// only after merge, skipped on PRs</span>
-            steps { sh './deploy.sh staging' }
-        }
-    }
-    post {
-        always  { junit 'reports/*.xml' }   <span class="c">// publish test results, pass or fail</span>
-        failure { echo 'Notify the team here' }
-    }
-}</pre>
+<div id="yx-jenkinsfile"></div>
+<p class="note">Click any line marked ● to see what it means.</p>
 <table>
 <tr><th>Block</th><th>Plain meaning</th></tr>
 <tr><td><code>agent</code></td><td>"Specifies where the entire Pipeline, or a specific stage, will execute"</td></tr>
@@ -228,6 +208,49 @@
 
 <div class="next"><span></span><span>Next: Reading your team's Jenkinsfile →</span></div>
 </main>
+<script src="../assets/yaml-explain.js"></script>
+<script>
+YamlExplain.mount(document.getElementById("yx-jenkinsfile"), `
+pipeline {
+    agent { label 'python' }
+    environment {
+        DWH_TOKEN = credentials('dwh-staging-token')
+    }
+    stages {
+        stage('Lint') {
+            steps { sh 'ruff check .' }
+        }
+        stage('Test') {
+            steps { sh 'pytest --junitxml=reports/unit.xml' }
+        }
+        stage('Deploy to staging') {
+            when { branch 'main' }
+            steps { sh './deploy.sh staging' }
+        }
+    }
+    post {
+        always  { junit 'reports/*.xml' }
+        failure { echo 'Notify the team here' }
+    }
+}
+`, {
+  1: "<b>pipeline {</b>: the outer block of a <em>Declarative</em> pipeline. Everything must sit inside it; the final <code>}</code> closes it.",
+  2: "<b>agent { label 'python' }</b>: <em>where</em> the pipeline runs: on any agent machine tagged with the label <code>python</code>. Jenkins picks a free one, and the repo is checked out into a <em>workspace</em> folder on it.",
+  3: "<b>environment {</b>: environment variables available to every step below. Shell commands see them as normal env vars (<code>$DWH_TOKEN</code>).",
+  4: "<b>DWH_TOKEN = credentials('dwh-staging-token')</b>: looks up the credential stored in Jenkins under the ID <code>dwh-staging-token</code> and puts its value in <code>DWH_TOKEN</code>. Jenkins masks it as <code>****</code> in logs. The secret lives in Jenkins, never in Git.",
+  6: "<b>stages {</b>: the ordered list of stages. They run top to bottom, and the first failure stops the rest.",
+  7: "<b>stage('Lint') {</b>: a named stage. <code>'Lint'</code> is the label on its box in the build UI.",
+  8: "<b>steps { sh 'ruff check .' }</b>: <code>steps</code> holds the actual work. <code>sh</code> runs a shell command on the agent. <code>ruff check .</code> lints every Python file under the current folder (<code>.</code> = the workspace). Any non-zero exit code fails the stage.",
+  10: "<b>stage('Test') {</b>: the second stage. It only runs if Lint passed.",
+  11: "<b>sh 'pytest --junitxml=reports/unit.xml'</b>: runs the test suite. <code>--junitxml=…</code> also writes the results as a JUnit-format XML file at <code>reports/unit.xml</code>, a format Jenkins can read (see line 19).",
+  13: "<b>stage('Deploy to staging') {</b>: the third stage, which ships the code to the staging environment.",
+  14: "<b>when { branch 'main' }</b>: a condition: run this stage only when the branch being built is <code>main</code>. On a PR build it's shown as <em>skipped</em>. <code>branch</code> only works in a multibranch pipeline.",
+  15: "<b>sh './deploy.sh staging'</b>: runs the repo's own deploy script, passing <code>staging</code> as its first argument. <code>./</code> = \"the file in the current folder\". The script can read <code>$DWH_TOKEN</code> from line 4.",
+  18: "<b>post {</b>: runs <em>after</em> all stages finish. Each block inside is a condition: <code>always</code>, <code>success</code>, <code>failure</code>, <code>unstable</code>, <code>changed</code>…",
+  19: "<b>always { junit 'reports/*.xml' }</b>: runs whether the build passed or failed. The <code>junit</code> step reads every XML file matching the glob and shows per-test results and trends in the Jenkins UI.",
+  20: "<b>failure { echo 'Notify the team here' }</b>: runs only if the build failed. <code>echo</code> just prints to the build log; it's a placeholder for a real Slack or email step.",
+});
+</script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/flow-stepper.js"></script>
 <script>
