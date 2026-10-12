@@ -16,6 +16,14 @@
   Required manifest fields (apiVersion/kind/metadata/spec), spec vs status. Use for: reading any YAML.
 - [Docs: Labels and Selectors (kubernetes.io)](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/)
   "The label selector is the core grouping primitive." Use for: how Deployments and Services find pods.
+- [Docs: Images (kubernetes.io)](https://kubernetes.io/docs/concepts/containers/images/)
+  Image names, tags vs digests, imagePullPolicy defaults, avoid `:latest`, ImagePullBackOff. Use for: anything about how images reach nodes.
+- [Task: Pull an Image from a Private Registry (kubernetes.io)](https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/)
+  imagePullSecrets walkthrough. Use for: customer private-registry setups.
+- [Argo CD docs](https://argo-cd.readthedocs.io/en/stable/)
+  The main GitOps tool: Git as source of truth, OutOfSync, sync policies. Use for: GitOps questions.
+- [GitHub Docs: Publishing Docker images](https://docs.github.com/en/actions/use-cases-and-examples/publishing-packages/publishing-docker-images)
+  Official GitHub Actions workflow for building and pushing to ghcr.io (actions pinned by SHA). Use for: CI examples.
 - [Tutorial: Kubernetes Basics (kubernetes.io)](https://kubernetes.io/docs/tutorials/kubernetes-basics/)
   Official guided intro: deploy, explore, expose, scale, update. Use for: first hands-on once a cluster is available.
 - [Killercoda Kubernetes playground](https://killercoda.com/playgrounds/scenario/kubernetes)

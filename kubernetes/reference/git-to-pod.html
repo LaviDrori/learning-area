@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Git-to-Pod Cheat Sheet</title>
+<link rel="stylesheet" href="../assets/course.css">
+<style> pre .c { color: var(--muted); } ol.hops li { margin: .3rem 0; } </style>
+</head>
+<body><main>
+<div class="crumbs">Lessons: <a href="../lessons/0001-desired-state-and-the-control-loop.html">1</a> · <a href="../lessons/0002-reading-a-deployment-manifest.html">2</a> · <a href="../lessons/0003-from-git-push-to-running-pod.html">3</a> · Reference: <a href="glossary.html">Glossary</a> · <a href="deployment-manifest.html">Deployment</a></div>
+<h1>Git-to-Pod Cheat Sheet</h1>
+<p class="subtitle">How your code reaches a customer's cluster. Sources: <a href="https://kubernetes.io/docs/concepts/containers/images/">kubernetes.io, Images</a> · <a href="https://argo-cd.readthedocs.io/en/stable/">Argo CD</a>.</p>
+
+<h2>The seven hops</h2>
+<ol class="hops">
+  <li><b>git push</b> a version tag to the <b>app repo</b> (code + Dockerfile)</li>
+  <li><b>CI</b> (e.g. GitHub Actions) builds the <b>image</b></li>
+  <li>CI pushes it to a <b>registry</b> as <code>host/path:tag</code></li>
+  <li>Someone updates <code>image:</code> in the Deployment: <b>CI runs kubectl/helm</b> (push) or a <b>config-repo commit</b> is synced by Argo CD/Flux (GitOps)</li>
+  <li>API server stores it → template changed → <b>new ReplicaSet</b> → new Pods</li>
+  <li>Scheduler picks a node → kubelet + runtime <b>pull the image</b> (needs <code>imagePullSecrets</code> if private)</li>
+  <li>Container runs your <code>CMD</code> → <code>Running</code></li>
+</ol>
+<p><b>Pods never touch Git.</b> The registry sits between build and run, and the <b>tag</b> links them.</p>
+
+<h2>Image reference anatomy</h2>
+<pre>ghcr.io/acme/forecast-api:v1.4.1          <span class="c"># registry host / path : tag</span>
+nginx:1.14.2                              <span class="c"># no host → Docker Hub</span>
+forecast-api@sha256:45b2…                 <span class="c"># digest: immutable content hash</span></pre>
+
+<h2>Rules operators expect</h2>
+<table>
+<tr><th>Rule</th><th>Why</th></tr>
+<tr><td>Never ship <code>:latest</code> to production</td><td>"harder to track which version of the image is running and more difficult to roll back properly"</td></tr>
+<tr><td>Every build gets a new tag</td><td>Re-pushing an existing tag: no template change, so no rollout, and nodes may keep the cached old image</td></tr>
+<tr><td>Digest for strict pinning</td><td>Tags can move; digests can't</td></tr>
+<tr><td>Image location must be overridable</td><td>Customers often mirror into a private registry</td></tr>
+</table>
+
+<h2>Default <code>imagePullPolicy</code> (when unset)</h2>
+<table>
+<tr><th>Reference</th><th>Default</th></tr>
+<tr><td>specific tag (<code>:v1.4.1</code>)</td><td><code>IfNotPresent</code></td></tr>
+<tr><td><code>:latest</code> or no tag</td><td><code>Always</code></td></tr>
+<tr><td>digest (<code>@sha256:…</code>)</td><td><code>IfNotPresent</code></td></tr>
+</table>
+
+<h2>Push vs GitOps</h2>
+<table>
+<tr><th></th><th>Push (CI deploys)</th><th>GitOps</th></tr>
+<tr><td>Who applies</td><td>CI runs <code>kubectl apply</code> / <code>helm upgrade</code></td><td>In-cluster tool syncs from a config repo</td></tr>
+<tr><td>Source of truth</td><td>Last apply</td><td>Git</td></tr>
+<tr><td>Drift shows as</td><td>(nothing)</td><td><code>OutOfSync</code></td></tr>
+<tr><td>Rollback</td><td>Re-run the old pipeline / <code>kubectl rollout undo</code></td><td>Revert the commit</td></tr>
+</table>
+
+<h2>Troubleshooting: <code>ImagePullBackOff</code></h2>
+<p>"Kubernetes could not pull a container image (for reasons such as invalid image name, or pulling from a private registry without <code>imagePullSecret</code>)." Retries with increasing delay, up to 5 min.</p>
+<ol>
+  <li>Does that <b>exact tag</b> exist in the registry? (typos, a tag never pushed)</li>
+  <li>Is the registry <b>private</b>? Does the pod spec reference <code>imagePullSecrets</code>, and does the Secret exist in the same namespace?</li>
+  <li>Can the customer's <b>nodes reach</b> the registry (firewall, air-gapped network)?</li>
+</ol>
+<pre>kubectl describe pod &lt;pod&gt;      <span class="c"># Events section shows the exact pull error</span></pre>
+</main></body></html>
