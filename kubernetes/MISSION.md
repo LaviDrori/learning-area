@@ -12,7 +12,7 @@ Lavi is a BI developer / AI engineer whose apps ship to customers as a repo plus
 
 ## Constraints
 - Fresh start: little prior hands-on with containers or Kubernetes
-- No org cluster. Local cluster waits on WSL2 security approval; until then: browser simulators, Killercoda
+- No org cluster, and no Docker on the work machine. Hands-on happens on a personal machine with Docker (Docker Desktop or an AWS EC2 box) after cloning this repo
 - ~20-30 minutes per lesson; multiple-choice preferred over open recall
 - Windows machine
 

@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dockerfile Cheat Sheet</title>
+<link rel="stylesheet" href="../assets/course.css">
+<style> pre .c { color: var(--muted); } </style>
+</head>
+<body><main>
+<div class="crumbs">Lessons: <a href="../lessons/0001-desired-state-and-the-control-loop.html">1</a> · <a href="../lessons/0002-reading-a-deployment-manifest.html">2</a> · <a href="../lessons/0003-from-git-push-to-running-pod.html">3</a> · <a href="../lessons/0004-a-kubernetes-friendly-dockerfile.html">4</a> · Reference: <a href="glossary.html">Glossary</a> · <a href="deployment-manifest.html">Deployment</a> · <a href="git-to-pod.html">Git-to-pod</a></div>
+<h1>Kubernetes-Friendly Dockerfile</h1>
+<p class="subtitle">What customers' DevOps teams check in your image. Sources: <a href="https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-termination">Pod termination</a> · <a href="https://kubernetes.io/docs/concepts/cluster-administration/logging/">Logging</a> · <a href="https://kubernetes.io/docs/concepts/security/pod-security-standards/">Pod Security Standards</a> · <a href="https://docs.docker.com/build/building/secrets/">Docker build secrets</a>.</p>
+
+<h2>Template (Python web app)</h2>
+<pre>FROM python:3.12-slim                                <span class="c"># pinned base tag: reproducible builds</span>
+ENV PYTHONUNBUFFERED=1                               <span class="c"># print()/logging reach stdout immediately</span>
+WORKDIR /app                                         <span class="c"># working dir for the rest + the app</span>
+COPY requirements.txt .                              <span class="c"># deps list first, so the install layer caches</span>
+RUN pip install --no-cache-dir -r requirements.txt   <span class="c"># install deps; skip pip's cache = smaller image</span>
+COPY . .                                             <span class="c"># code, filtered by .dockerignore</span>
+RUN useradd --create-home --uid 10001 appuser        <span class="c"># non-root user with a fixed UID</span>
+USER 10001                                           <span class="c"># NUMERIC, so runAsNonRoot can verify it</span>
+EXPOSE 8000                                          <span class="c"># documentation: the app's port</span>
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]  <span class="c"># exec form: app is PID 1, gets SIGTERM</span></pre>
+<pre>.git  .venv  .env  __pycache__  *.pyc                <span class="c"># .dockerignore: keep history, venv, secrets, bytecode out</span></pre>
+
+<h2>Customer question → Dockerfile line</h2>
+<table>
+<tr><th>They ask</th><th>Line</th><th>Rule</th></tr>
+<tr><td>Where are the logs?</td><td><code>ENV PYTHONUNBUFFERED=1</code>, <code>CMD</code></td><td>stdout/stderr only, never a file. <code>kubectl logs</code> reads those streams.</td></tr>
+<tr><td>Graceful shutdown?</td><td><code>CMD [...]</code></td><td>Exec form. Kubelet sends SIGTERM to PID 1, then SIGKILL after <code>terminationGracePeriodSeconds</code> (default 30s).</td></tr>
+<tr><td>Runs as root?</td><td><code>USER 10001</code></td><td>Non-root <b>and numeric</b>. Without USER, you inherit the base image's user (root for official Python).</td></tr>
+<tr><td>Secrets in the image?</td><td><code>ENV</code>, <code>ARG</code>, <code>COPY</code></td><td>None. ENV/ARG "persist in the final image". Read secrets from env vars injected by a K8s Secret.</td></tr>
+<tr><td>Reproducible?</td><td><code>FROM</code></td><td>Pinned tag or digest, never <code>:latest</code>.</td></tr>
+</table>
+
+<h2>Symptom → cause</h2>
+<table>
+<tr><th>Symptom</th><th>Likely Dockerfile cause</th></tr>
+<tr><td><code>kubectl logs</code> empty</td><td>App logs to a file (<code>&gt; app.log</code>, <code>FileHandler</code>)</td></tr>
+<tr><td>Logs late, in bursts</td><td>Python stdout buffering: missing <code>PYTHONUNBUFFERED=1</code></td></tr>
+<tr><td>Pods take exactly 30s to stop; requests cut</td><td>Shell-form <code>CMD</code>: <code>sh</code> is PID 1 and doesn't forward SIGTERM</td></tr>
+<tr><td><code>image has non-numeric user (…), cannot verify user is non-root</code></td><td><code>USER name</code> instead of <code>USER 10001</code></td></tr>
+<tr><td><code>image will run as root</code></td><td>No <code>USER</code> line at all</td></tr>
+<tr><td><code>Permission denied</code> writing under <code>/app</code></td><td>Non-root user, root-owned dir: write to <code>/tmp</code> or a volume</td></tr>
+<tr><td>Scanner finds a key / <code>.env</code> in image</td><td>Secret in <code>ENV</code>, or no <code>.dockerignore</code></td></tr>
+</table>
+</main></body></html>
