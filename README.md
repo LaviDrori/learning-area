@@ -1,6 +1,6 @@
 # learning-area
 
-A personal Kubernetes learning workspace. The goal and constraints are in [MISSION.md](MISSION.md).
+A personal learning workspace for any topic I want to learn over multiple sessions. The current topic is Kubernetes; its goal and constraints are in [MISSION.md](MISSION.md).
 
 All content here is AI-generated and maintained via the `/mattpocock-skills:teach` skill.
 
@@ -8,7 +8,7 @@ All content here is AI-generated and maintained via the `/mattpocock-skills:teac
 
 | Path | What |
 |------|------|
-| `MISSION.md` | Why I'm learning this; grounds every lesson |
+| `MISSION.md` | Why I'm learning the current topic; grounds every lesson |
 | `lessons/` | Short interactive HTML lessons (`0001-<name>.html`) |
 | `reference/` | Cheat sheets and the glossary, for quick lookup |
 | `learning-records/` | What I've learned; drives what comes next |
