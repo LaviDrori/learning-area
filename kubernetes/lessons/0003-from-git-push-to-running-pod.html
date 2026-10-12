@@ -118,59 +118,17 @@
 </div>
 
 <h2>6. The actual files</h2>
-<p>Three small files make up the whole pipeline. Expand them. They're simplified sketches, not copy-paste production files.</p>
+<p>Three small files make up the whole pipeline. Expand them, then click any line marked ● to see what it means. They're simplified sketches, not copy-paste production files.</p>
 <details><summary>Dockerfile (in your app repo): how the image is built</summary>
-<pre>FROM python:3.12-slim
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-COPY . .
-EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]</pre>
+<div id="yx-docker"></div>
 <p class="note">Lesson 4 is about making this Kubernetes-friendly: logs, shutdown signals, non-root, no secrets baked in.</p>
 </details>
 <details><summary>.github/workflows/image.yml (in your app repo): CI builds and pushes on each version tag</summary>
-<pre>name: build-and-push-image
-on:
-  push:
-    tags: ["v*"]                 # runs when you push a tag like v1.4.1
-jobs:
-  image:
-    runs-on: ubuntu-latest
-    permissions: { contents: read, packages: write }
-    steps:
-      - uses: actions/checkout@v6
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
-        with:
-          push: true
-          tags: ghcr.io/acme/forecast-api:${{ github.ref_name }}   # → :v1.4.1</pre>
+<div id="yx-gha"></div>
 <p class="note">Structure follows GitHub's <a href="https://docs.github.com/en/actions/use-cases-and-examples/publishing-packages/publishing-docker-images">"Publishing Docker images"</a> guide, which pins each action to an exact commit SHA. Copy versions from there for real use.</p>
 </details>
 <details><summary>deployment.yaml (often in the customer's config repo): where the tag lands</summary>
-<pre>apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: forecast-api
-spec:
-  replicas: 2
-  selector:
-    matchLabels: { app: forecast-api }
-  template:
-    metadata:
-      labels: { app: forecast-api }
-    spec:
-      imagePullSecrets:              # credentials for a private registry
-      - name: regcred                # a Secret the customer creates
-      containers:
-      - name: forecast-api
-        image: ghcr.io/acme/forecast-api:v1.4.1   # ← the hand-off point
-        ports:
-        - containerPort: 8000</pre>
+<div id="yx-deploy"></div>
 <p class="note"><code>imagePullSecrets</code> "specifies that Kubernetes should get the credentials from a Secret named <code>regcred</code>". See <a href="https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/">Pull an Image from a Private Registry</a>.</p>
 </details>
 
@@ -234,6 +192,110 @@ spec:
 
 <div class="next"><span><a href="0002-reading-a-deployment-manifest.html">← Lesson 2: Deployments</a></span><span>Next: A Kubernetes-friendly Dockerfile →</span></div>
 </main>
+<script src="../assets/yaml-explain.js"></script>
+<script>
+YamlExplain.mount(document.getElementById("yx-docker"), `
+FROM python:3.12-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+EXPOSE 8000
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+`, {
+  1: "<b>FROM python:3.12-slim</b>: the <em>base image</em> your image is built on top of. Here that's the official Python 3.12 image on a trimmed-down (<code>slim</code>) Debian. <code>3.12-slim</code> is a <b>tag</b>, so it can move. Pin it by digest (<code>python:3.12-slim@sha256:…</code>) if you need byte-identical rebuilds.",
+  2: "<b>WORKDIR /app</b>: sets the current directory inside the image, and creates it if it doesn't exist. Every later <code>COPY</code>/<code>RUN</code>/<code>CMD</code> runs from <code>/app</code>. It works like <code>cd</code>, but it persists.",
+  3: "<b>COPY requirements.txt .</b>: copies <em>only</em> the dependency list from your repo (the build context) into <code>/app</code> (the <code>.</code>). It's copied before the rest of the code on purpose: Docker caches each step, so if <code>requirements.txt</code> didn't change, the slow install on the next line is reused.",
+  4: "<b>RUN pip install --no-cache-dir -r requirements.txt</b>: <code>RUN</code> executes at <em>build</em> time and saves the result into the image. <code>-r requirements.txt</code> means \"install everything listed in this file\". <code>--no-cache-dir</code> stops pip keeping its download cache, which makes the image smaller.",
+  5: "<b>COPY . .</b>: copies the rest of your repo (first <code>.</code> = build context) into <code>/app</code> (second <code>.</code> = WORKDIR). A <code>.dockerignore</code> file keeps junk like <code>.git</code> and <code>.venv</code> out.",
+  6: "<b>EXPOSE 8000</b>: <em>documentation only</em>. It says \"the app listens on 8000\" but doesn't open or publish anything. It's the Dockerfile cousin of <code>containerPort</code> in the Deployment.",
+  7: "<b>CMD [...]</b>: the command run when a container <em>starts</em> (runtime, not build time). The JSON-array form (exec form) makes uvicorn PID 1, so it receives shutdown signals directly. <code>uvicorn</code> = the Python web server. <code>app.main:app</code> = \"in <code>app/main.py</code>, serve the object named <code>app</code>\". <code>--host 0.0.0.0</code> = listen on every network interface; with <code>127.0.0.1</code> nothing outside the container could reach it. <code>--port 8000</code> = matches EXPOSE and containerPort.",
+});
+
+YamlExplain.mount(document.getElementById("yx-gha"), `
+name: build-and-push-image
+on:
+  push:
+    tags: ["v*"]
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    permissions: { contents: read, packages: write }
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: \${{ github.actor }}
+          password: \${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          push: true
+          tags: ghcr.io/acme/forecast-api:\${{ github.ref_name }}
+`, {
+  1: "<b>name</b>: the workflow's display name in the repo's <em>Actions</em> tab. Cosmetic.",
+  2: "<b>on:</b> the <em>triggers</em>: which events start this workflow.",
+  3: "<b>push:</b> trigger on a push to the repo (as opposed to <code>pull_request</code>, <code>schedule</code>, a manual run…).",
+  4: "<b>tags: [\"v*\"]</b>: narrows the push trigger to <em>tag</em> pushes matching the glob <code>v*</code>, e.g. <code>git push origin v1.4.1</code>. Ordinary commits to branches don't build an image. One release tag gives one image.",
+  5: "<b>jobs:</b> the work to do. Each job runs on its own fresh machine, and jobs run in parallel unless you chain them with <code>needs:</code>.",
+  6: "<b>image:</b> the job's ID. You pick the name. It shows up in the UI and in <code>needs:</code> references.",
+  7: "<b>runs-on: ubuntu-latest</b>: which machine (a <em>runner</em>) runs the job. Here it's a GitHub-hosted Ubuntu VM, created fresh for this run and thrown away after. It's the same idea as a Jenkins <code>agent</code>.",
+  8: "<b>permissions</b>: what the run's automatic token (line 15) may do. <code>contents: read</code> = read the repo's code. <code>packages: write</code> = push to GitHub Packages, which includes ghcr.io. Everything else is denied (least privilege). <code>{ … }</code> is YAML's one-line map syntax.",
+  9: "<b>steps:</b> an ordered list. Steps run one after another on the <em>same</em> runner, so files from one step are there for the next. Each <code>-</code> starts a new step.",
+  10: "<b>uses: actions/checkout@v6</b>: <code>uses</code> runs a ready-made <em>action</em> (someone else's reusable step). This one clones your repo onto the runner, which starts empty. <code>@v6</code> is the action's version, a Git tag. Like an image tag it can move, so security-minded teams pin a commit SHA.",
+  11: "<b>uses: docker/login-action@v3</b>: logs Docker in to a registry so the push later is allowed.",
+  12: "<b>with:</b> inputs passed to the action above it, like function arguments.",
+  13: "<b>registry: ghcr.io</b>: which registry to log in to. GitHub Container Registry.",
+  14: "<b>username: ${{ github.actor }}</b>: <code>${{ … }}</code> is a GitHub <em>expression</em>, filled in at run time. <code>github.actor</code> = the user who triggered the run.",
+  15: "<b>password: ${{ secrets.GITHUB_TOKEN }}</b>: a short-lived token GitHub creates for every run and revokes after it. Its powers come from <code>permissions</code> (line 8). No real password is ever written in the file.",
+  16: "<b>uses: docker/build-push-action@v6</b>: builds the image from your <code>Dockerfile</code> (by default the one at the repo root) and pushes it.",
+  17: "<b>with:</b> inputs for the build-push action.",
+  18: "<b>push: true</b>: push the built image to the registry. With <code>false</code> it only builds, which is handy on PRs to check that the Dockerfile still works.",
+  19: "<b>tags: ghcr.io/acme/forecast-api:${{ github.ref_name }}</b>: the image's full name: <code>registry/owner/image:tag</code>. <code>github.ref_name</code> = the short name of what triggered the run, here the Git tag, e.g. <code>v1.4.1</code>. So Git tag <code>v1.4.1</code> becomes image <code>…:v1.4.1</code>. The registry also gives the pushed image a <b>digest</b>.",
+});
+
+YamlExplain.mount(document.getElementById("yx-deploy"), `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: forecast-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: forecast-api }
+  template:
+    metadata:
+      labels: { app: forecast-api }
+    spec:
+      imagePullSecrets:
+      - name: regcred
+      containers:
+      - name: forecast-api
+        image: ghcr.io/acme/forecast-api:v1.4.1
+        ports:
+        - containerPort: 8000
+`, {
+  1: "<b>apiVersion: apps/v1</b>: which API group and version this object belongs to. Deployments live in group <code>apps</code>, version <code>v1</code>.",
+  2: "<b>kind: Deployment</b>: what kind of object this is. This one field decides which controller manages it.",
+  3: "<b>metadata:</b> the object's identity: name, namespace, labels. It's about the Deployment, not its pods.",
+  4: "<b>name: forecast-api</b>: the Deployment's name. It must be unique per namespace, and it becomes the prefix of every ReplicaSet and Pod name (<code>forecast-api-7d9f…</code>).",
+  5: "<b>spec:</b> the Deployment's <em>desired state</em>. Everything below is what you want. Kubernetes reports what <em>is</em> under <code>status</code>.",
+  6: "<b>replicas: 2</b>: keep two identical Pods running. If one dies, the controller replaces it. Two instead of one means a node failure or rollout doesn't take the app fully down.",
+  7: "<b>selector:</b> how the Deployment recognises <em>its</em> pods: by labels, never by name. Required, and can't be changed after creation.",
+  8: "<b>matchLabels: { app: forecast-api }</b>: \"my pods are the ones labelled <code>app=forecast-api</code>\". <code>{ … }</code> is one-line YAML for a map. It must match the template labels on line 11, or the API rejects the object.",
+  9: "<b>template:</b> the Pod blueprint. Everything under it describes each Pod. Change anything in here (the image, say) and you get a rollout.",
+  10: "<b>metadata:</b> this time it's the <em>Pod's</em> metadata, not the Deployment's (line 3). Indentation tells you which.",
+  11: "<b>labels: { app: forecast-api }</b>: stamped on every Pod created from this template. The selector (line 8) and any Service find the pods through this label.",
+  12: "<b>spec:</b> the <em>Pod's</em> spec, a spec inside a spec. Line 5 described the Deployment; this one describes each Pod.",
+  13: "<b>imagePullSecrets:</b> registry credentials the node uses to pull the image. You need them when the registry is private. Without them you get <code>ImagePullBackOff</code>.",
+  14: "<b>- name: regcred</b>: the <code>-</code> makes this a list item. It refers to a Secret called <code>regcred</code> in the same namespace, which the customer creates with <code>kubectl create secret docker-registry regcred …</code>.",
+  15: "<b>containers:</b> the list of containers in each Pod. Usually one.",
+  16: "<b>- name: forecast-api</b>: the container's name inside the Pod. It's what <code>kubectl logs &lt;pod&gt; -c forecast-api</code> uses.",
+  17: "<b>image: ghcr.io/acme/forecast-api:v1.4.1</b>: <b>the hand-off point.</b> CI's output (the workflow's <code>tags:</code> line) is this line's input. Form: <code>registry/owner/image:tag</code>. To make it immutable, append <code>@sha256:…</code> (a digest).",
+  18: "<b>ports:</b> the list of ports this container listens on.",
+  19: "<b>- containerPort: 8000</b>: the app listens on 8000, matching the Dockerfile's <code>--port 8000</code>. Mostly informational; sending traffic to it is a <b>Service</b>'s job.",
+});
+</script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/flow-stepper.js"></script>
 <script>
