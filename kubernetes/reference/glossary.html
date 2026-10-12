@@ -6,7 +6,7 @@
 <link rel="stylesheet" href="../assets/course.css">
 </head>
 <body><main>
-<div class="crumbs">Lessons: <a href="../lessons/0001-desired-state-and-the-control-loop.html">1</a> · <a href="../lessons/0002-reading-a-deployment-manifest.html">2</a> · <a href="../lessons/0003-from-git-push-to-running-pod.html">3</a> · Reference: <a href="deployment-manifest.html">Deployment</a> · <a href="git-to-pod.html">Git-to-pod</a></div>
+<div class="crumbs">Lessons: <a href="../lessons/0001-desired-state-and-the-control-loop.html">1</a> · <a href="../lessons/0002-reading-a-deployment-manifest.html">2</a> · <a href="../lessons/0003-from-git-push-to-running-pod.html">3</a> · <a href="../lessons/0004-a-kubernetes-friendly-dockerfile.html">4</a> · Reference: <a href="deployment-manifest.html">Deployment</a> · <a href="git-to-pod.html">Git-to-pod</a> · <a href="dockerfile-for-k8s.html">Dockerfile</a></div>
 <h1>Glossary</h1>
 <p class="subtitle">The course's single source of truth for terms. Lessons use these words exactly as defined here. Definitions are quoted or adapted from <a href="https://kubernetes.io/docs/reference/glossary/">kubernetes.io</a>.</p>
 
@@ -52,6 +52,15 @@
 <tr><td><b>App repo vs config repo</b></td><td>App repo = code + Dockerfile (yours). Config repo = manifests for deploying (often the customer's).</td><td>L3</td></tr>
 <tr><td><b>GitOps</b></td><td>Desired state lives in a Git repo; an in-cluster tool continuously syncs the cluster to it. A control loop with Git as the thermostat setting.</td><td><a href="https://argo-cd.readthedocs.io/en/stable/">Argo CD</a> · L3</td></tr>
 <tr><td><b>Argo CD / OutOfSync</b></td><td>"A declarative, GitOps continuous delivery tool for Kubernetes." <code>OutOfSync</code> = live state deviates from Git.</td><td><a href="https://argo-cd.readthedocs.io/en/stable/">Argo CD</a> · L3</td></tr>
+<tr><td><b>Dockerfile</b></td><td>The recipe <code>docker build</code> turns into an image. Each instruction (<code>FROM</code>, <code>RUN</code>, <code>COPY</code>, <code>USER</code>, <code>CMD</code>…) is one step.</td><td><a href="https://docs.docker.com/reference/dockerfile/">docs</a> · L4</td></tr>
+<tr><td><b>Base image</b></td><td>The image named in <code>FROM</code> that yours is built on (e.g. <code>python:3.12-slim</code>). You inherit its OS, its tools and its default user.</td><td><a href="https://docs.docker.com/reference/dockerfile/#from">docs</a> · L4</td></tr>
+<tr><td><b>Exec form vs shell form</b></td><td><code>CMD ["app", "arg"]</code> runs the app directly as PID 1. <code>CMD app arg</code> runs it under <code>/bin/sh -c</code>, which doesn't pass signals on.</td><td><a href="https://docs.docker.com/reference/dockerfile/#entrypoint">docs</a> · L4</td></tr>
+<tr><td><b>PID 1</b></td><td>The container's main process. It's the one that receives the kubelet's stop signal.</td><td><a href="https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-termination">docs</a> · L4</td></tr>
+<tr><td><b>SIGTERM / SIGKILL</b></td><td>SIGTERM = "please stop" (catchable: finish work, then exit). SIGKILL = immediate kill, can't be caught. The kubelet sends SIGTERM first, then SIGKILL after the grace period.</td><td><a href="https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-termination">docs</a> · L4</td></tr>
+<tr><td><b>terminationGracePeriodSeconds</b></td><td>Pod-spec field: the maximum wait between SIGTERM and SIGKILL. Default 30.</td><td><a href="https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-termination">docs</a> · L4</td></tr>
+<tr><td><b>runAsNonRoot</b></td><td>securityContext field. If true, the kubelet refuses to start a container that would run as UID 0, or whose image user is a non-numeric name it can't verify.</td><td><a href="https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-v1/">docs</a> · L4</td></tr>
+<tr><td><b>Pod Security Standards</b></td><td>Three built-in policy levels: Privileged, Baseline, Restricted. Restricted ("current Pod hardening best practices") requires non-root.</td><td><a href="https://kubernetes.io/docs/concepts/security/pod-security-standards/">docs</a> · L4</td></tr>
+<tr><td><b>.dockerignore</b></td><td>File listing paths <code>COPY</code> must skip (<code>.git</code>, <code>.venv</code>, <code>.env</code>…).</td><td><a href="https://docs.docker.com/build/concepts/context/#dockerignore-files">docs</a> · L4</td></tr>
 </table>
 
 <h2>Control plane, the brain</h2>

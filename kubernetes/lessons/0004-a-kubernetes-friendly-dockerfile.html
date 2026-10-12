@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kubernetes-Friendly Dockerfile</title>
+<link rel="stylesheet" href="../assets/course.css">
+<style>
+  .tl svg text { font-family: var(--mono); font-size: 12px; fill: var(--fg); }
+  .tl svg .lbl { font-family: var(--serif); font-style: italic; fill: var(--muted); }
+  .tl svg .axis { stroke: var(--rule); stroke-width: 2; }
+  .tl svg .good { stroke: var(--good); stroke-width: 6; }
+  .tl svg .bad { stroke: var(--bad); stroke-width: 6; }
+  .tl svg .tick { stroke: var(--fg); stroke-width: 1.4; }
+  .tl svg .kill { fill: var(--bad); }
+  .tl svg .ok { fill: var(--good); }
+  details { margin: .8rem 0; }
+  summary { cursor: pointer; font-weight: 600; }
+  .story { border-left: 3px solid var(--rule); padding-left: 1rem; margin: 1rem 0; }
+</style>
+</head>
+<body><main>
+<div class="crumbs">Kubernetes · Lesson 4 · <a href="0003-from-git-push-to-running-pod.html">Lesson 3</a> · <a href="../reference/glossary.html">Glossary</a> · <a href="../reference/dockerfile-for-k8s.html">Dockerfile cheat sheet</a></div>
+
+<h1>A Kubernetes-Friendly Dockerfile</h1>
+<p class="subtitle">Ten lines that decide what a customer's DevOps team will ask you. ~25 minutes.</p>
+
+<div class="goal"><strong>Your win today:</strong> look at a Dockerfile and know, line by line, how it answers four standard customer questions: <em>Where do your logs go? Do you shut down cleanly? Do you run as root? Is anything secret baked in?</em> Then fix a broken one.</div>
+
+<h2>0. Warm-up <span class="score"></span></h2>
+<div class="quiz" data-answer="0">
+  <p class="q">You re-push a fixed image under the <em>same</em> tag <code>v1.4.0</code>. Nodes that already pulled <code>v1.4.0</code>…</p>
+  <button>keep running the old cached image</button>
+  <button>pull the fix within one minute</button>
+  <button>restart the pod with fresh layers</button>
+  <p class="why">With a real tag, <code>imagePullPolicy</code> defaults to <code>IfNotPresent</code>, and the manifest didn't change, so nothing rolls out (Lesson 3). Every build gets a new tag.</p>
+</div>
+<div class="quiz" data-answer="0">
+  <p class="q">On a healthy node, your app's process crashes. Who restarts the container?</p>
+  <button>The kubelet on that same node</button>
+  <button>The ReplicaSet controller, creating new pods</button>
+  <button>The scheduler, after picking another node</button>
+  <p class="why">The pod still exists, so the <b>kubelet</b> restarts its container in place. The ReplicaSet only steps in when a whole <em>pod</em> disappears (Lesson 1's three healers). Today's lesson is about what your process does at those start and stop moments.</p>
+</div>
+
+<h2>1. The cluster only sees your image</h2>
+<p>A customer's cluster can't read your code or ask you how the app behaves. All it gets is the image, and the image does whatever your Dockerfile told it to. So when DevOps asks you a "readiness" question, the answer is usually <b>one line of your Dockerfile</b>:</p>
+<table>
+<tr><th>The customer asks…</th><th>…and the answer lives in</th></tr>
+<tr><td>"Where do your logs go?"</td><td><code>ENV PYTHONUNBUFFERED=1</code> + your <code>CMD</code></td></tr>
+<tr><td>"Does it shut down gracefully?"</td><td>the <em>form</em> of your <code>CMD</code></td></tr>
+<tr><td>"Does it run as root?"</td><td><code>USER</code></td></tr>
+<tr><td>"Are there secrets in the image?"</td><td><code>ENV</code>, <code>ARG</code>, <code>COPY</code> + <code>.dockerignore</code></td></tr>
+<tr><td>"Is the build reproducible?"</td><td><code>FROM</code> (the base image tag)</td></tr>
+</table>
+
+<h2>2. Four habits</h2>
+
+<h3>① Log to stdout, not to a file</h3>
+<p>"The easiest and most adopted logging method for containerized applications is writing to standard output and standard error streams." The kubelet stores those streams, and <code>kubectl logs</code> reads them back<span class="note"><a href="https://kubernetes.io/docs/concepts/cluster-administration/logging/">kubernetes.io, Logging Architecture</a>.</span>. The customer's log collector (Splunk, Datadog, Elastic…) usually picks them up from there as well. If your app writes to <code>/app/server.log</code> instead, <code>kubectl logs</code> shows nothing, and the file disappears when the container does.</p>
+<p><b>The Python catch:</b> when stdout isn't a terminal, which is always the case in a container, Python's stdout "is block-buffered like regular text files". Your <code>print()</code> lines then arrive late and in bursts, and the last ones are lost if the app crashes. The fix is <code>PYTHONUNBUFFERED</code>: "If this is set to a non-empty string it is equivalent to specifying the <code>-u</code> option", which forces the streams to be unbuffered<span class="note">Python docs: <a href="https://docs.python.org/3/library/sys.html#sys.stdout">sys.stdout</a>, <a href="https://docs.python.org/3/using/cmdline.html#envvar-PYTHONUNBUFFERED">PYTHONUNBUFFERED</a>.</span>.</p>
+
+<h3>② Stop when asked: exec-form <code>CMD</code></h3>
+<p>Pods are stopped all the time: every rollout, scale-down and node drain. To stop one, the kubelet "first sen[ds] a TERM (aka. SIGTERM) signal, with a grace period timeout, to the main process in each container." "The default <code>terminationGracePeriodSeconds</code> setting is 30 seconds." After that, "the container runtime sends <code>SIGKILL</code>"<span class="note"><a href="https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-termination">kubernetes.io, Pod Lifecycle: Termination of Pods</a>.</span>. SIGKILL can't be caught, so any request still in progress is cut off.</p>
+<figure class="tl">
+<svg viewBox="0 0 640 150" role="img" aria-label="Timeline. Exec form: SIGTERM at 0 seconds, the app finishes requests and exits after about 2 seconds. Shell form: the shell does not forward SIGTERM, the app keeps running until SIGKILL at 30 seconds.">
+  <line class="axis" x1="110" y1="125" x2="620" y2="125"/>
+  <line class="tick" x1="120" y1="20" x2="120" y2="130"/><text x="120" y="145" text-anchor="middle">0s SIGTERM</text>
+  <line class="tick" x1="600" y1="20" x2="600" y2="130"/><text x="600" y="145" text-anchor="middle">30s SIGKILL</text>
+  <text x="10" y="50">exec form</text><line class="good" x1="120" y1="46" x2="152" y2="46"/>
+  <circle class="ok" cx="156" cy="46" r="5"/><text class="lbl" x="168" y="50">app finishes requests, exits at ~2s ✓</text>
+  <text x="10" y="95">shell form</text><line class="bad" x1="120" y1="91" x2="596" y2="91"/>
+  <circle class="kill" cx="600" cy="91" r="5"/><text class="lbl" x="180" y="82">sh gets SIGTERM and doesn't pass it on; app runs on…</text>
+</svg>
+<figcaption>Same app, same signal. Only the <em>form</em> of <code>CMD</code> differs.</figcaption>
+</figure>
+<p>"The main process" is <b>PID 1</b> in the container. With the <b>exec form</b>, <code>CMD ["uvicorn", …]</code>, uvicorn <em>is</em> PID 1, gets SIGTERM, and shuts down gracefully. With the <b>shell form</b>, <code>CMD uvicorn …</code>, Docker starts your command "as a subcommand of <code>/bin/sh -c</code>, which does not pass signals. This means that the executable will not be the container's PID 1, and will not receive Unix signals"<span class="note"><a href="https://docs.docker.com/reference/dockerfile/#entrypoint">Dockerfile reference, ENTRYPOINT</a>. The same applies to <code>CMD</code>.</span>.</p>
+
+<h3>③ Run as a non-root, <em>numeric</em> user</h3>
+<p>Without a <code>USER</code> line, your app runs as whatever the base image says. For <code>python:3.12-slim</code>, that's root. Security-minded customers forbid that. The Kubernetes <a href="https://kubernetes.io/docs/concepts/security/pod-security-standards/">Pod Security Standards</a> "Restricted" profile requires "Containers must be required to run as non-root users", enforced with <code>runAsNonRoot: true</code>. With that set, "the Kubelet will validate the image at runtime to ensure that it does not run as UID 0 (root) and fail to start the container if it does"<span class="note"><a href="https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-v1/">Pod API reference, SecurityContext</a>.</span>.</p>
+<div class="callout"><b>The trap:</b> <code>USER appuser</code> (a <em>name</em>) isn't enough. The kubelet can't look names up inside your image, so it refuses with: <code>container has runAsNonRoot and image has non-numeric user (appuser), cannot verify user is non-root</code><span class="note">Exact message from the <a href="https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/kuberuntime/security_context_others.go">kubelet source</a>.</span>. Use a number: <code>USER 10001</code>. One more side effect: a non-root user can't write into root-owned folders like <code>/app</code>, so write temporary files to <code>/tmp</code> (storage gets its own lesson later).</div>
+
+<h3>④ Nothing secret or customer-specific in the image</h3>
+<p>Everyone who can pull your image can read everything in it, including <code>ENV</code> values. Docker's docs are blunt: "Build arguments and environment variables are inappropriate for passing secrets to your build, because they persist in the final image"<span class="note"><a href="https://docs.docker.com/build/building/secrets/">Docker docs, Build secrets</a>.</span>. A baked-in key also can't differ per customer or be rotated without a rebuild. The pattern instead: <b>the image reads <code>os.environ["OPENAI_API_KEY"]</code> at startup, and the customer's cluster injects the value from a Kubernetes Secret.</b> (Lesson 6 covers how.) A <code>.dockerignore</code> file keeps your local <code>.env</code> and <code>.git</code> out of <code>COPY . .</code>.</p>
+<p class="note">Habit ⓪, already covered in Lesson 3, applies to <code>FROM</code> too: <code>python:latest</code> can turn into a new Python version under you. Pin a real tag such as <code>3.12-slim</code>, or a digest.</p>
+
+<h2>3. Spot the line</h2>
+<p>A customer sent back six complaints about this Dockerfile. For each symptom, click the line responsible. Every click shows what that line does, so wrong guesses teach too.</p>
+<div id="spot"></div>
+
+<h2>4. The fixed version</h2>
+<p>This is the Lesson 3 Dockerfile with the four habits added. Click any line marked ● to see what it does.</p>
+<div id="yx-good"></div>
+<details><summary>.dockerignore (next to the Dockerfile): what <code>COPY . .</code> must skip</summary>
+<div id="yx-ignore"></div>
+</details>
+
+<h2>5. Day-to-day stories</h2>
+<div class="story">
+<h3>Story A: the bank's first deploy fails</h3>
+<p>A bank's platform team deploys <code>forecast-api:v1.4.1</code>. Their namespace enforces the Restricted profile. The pods never start, and <code>kubectl get pods</code> shows <code>CreateContainerConfigError</code>. Their engineer emails you the non-numeric-user message. You change <code>USER appuser</code> to <code>USER 10001</code>, tag <code>v1.4.2</code>, and CI pushes it. They bump the tag in their config repo, and the pods start.</p>
+</div>
+<div class="story">
+<h3>Story B: "every rollout drops requests"</h3>
+<p>The customer notices that each rollout of <code>forecast-api</code> takes about 30 seconds per pod and some forecasts fail with connection errors. That exact 30 is the giveaway: nothing exits until SIGKILL. Your <code>CMD</code> is in shell form. You switch to exec form, and old pods now exit within seconds of SIGTERM after finishing their in-flight requests.</p>
+</div>
+<div class="story">
+<h3>Story C: "your app has no logs"</h3>
+<p>Support asks the customer for logs. <code>kubectl logs</code> returns a few lines from an hour ago. Two causes stack up: Python buffering (fixed with <code>PYTHONUNBUFFERED=1</code>) and a <code>logging.FileHandler</code> writing to a file. You switch to a <code>StreamHandler</code> on stdout, and their log collector now has everything.</p>
+</div>
+
+<hr>
+
+<h2>6. A customer asks… <span class="score"></span></h2>
+
+<div class="quiz" data-answer="0">
+  <p class="q">Your app logs with <code>print()</code>. <code>kubectl logs</code> shows the lines minutes late, in bursts. Most likely cause?</p>
+  <button>Python buffers stdout when it's not a terminal</button>
+  <button>The kubelet only collects logs every few minutes</button>
+  <button>The Service delays traffic until logs are flushed</button>
+  <p class="why">In a container stdout is a pipe, not a terminal, so Python block-buffers it. <code>ENV PYTHONUNBUFFERED=1</code> makes every line go out immediately.</p>
+</div>
+
+<div class="quiz" data-answer="2">
+  <p class="q">Their pod spec sets <code>runAsNonRoot: true</code>. Your image ends with <code>USER appuser</code>. What happens?</p>
+  <button>Runs fine: any user except root is accepted</button>
+  <button>API rejects the Deployment before any pod exists</button>
+  <button>Start fails: kubelet can't verify a named user</button>
+  <p class="why">The check happens on the node when the container starts, not at <code>kubectl apply</code>. A name can't be verified as non-zero, so the kubelet refuses. Fix: <code>USER 10001</code>. The customer could also set <code>runAsUser</code> themselves, but don't make them.</p>
+</div>
+
+<div class="quiz" data-answer="1">
+  <p class="q">During rollouts, each old pod takes exactly 30 seconds to go away. Your <code>CMD</code> is in shell form. Why?</p>
+  <button>Kubernetes always waits thirty seconds per pod</button>
+  <button>sh is PID 1 and swallows SIGTERM</button>
+  <button>The Service drains traffic for thirty seconds</button>
+  <p class="why">The grace period is a <em>maximum</em>. A pod is gone as soon as its processes exit. The shell never passes SIGTERM to uvicorn, so the pod waits for SIGKILL at 30s.</p>
+</div>
+
+<div class="quiz" data-answer="0">
+  <p class="q">A scan finds <code>ENV OPENAI_API_KEY=sk-…</code> in your image. After rotating the key, what's the proper fix?</p>
+  <button>Inject it at runtime from a Kubernetes Secret</button>
+  <button>Move it to an ARG so it's build-only</button>
+  <button>Base64-encode the value inside the ENV line</button>
+  <p class="why">Docker: build args and env vars "persist in the final image". Base64 is an encoding, not encryption. The image should only <em>read</em> the variable, and the cluster supplies it.</p>
+</div>
+
+<div class="quiz" data-answer="1">
+  <p class="q">Your Dockerfile has no <code>USER</code> line, and the customer's pod spec says nothing about users. Who runs your app?</p>
+  <button>nobody, because Kubernetes drops root by default</button>
+  <button>root, because nothing ever set another user</button>
+  <button>UID 1000, Kubernetes's default for all pods</button>
+  <p class="why"><code>runAsUser</code> "Defaults to user specified in image metadata if unspecified." The official Python image doesn't set one, so it's root. Kubernetes doesn't change that unless the pod spec says so.</p>
+</div>
+
+<hr>
+
+<div class="callout source"><b>Primary source, read this next (~10 min):</b> <a href="https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-termination">kubernetes.io, Pod Lifecycle: "Termination of Pods"</a>. It's the exact sequence your app goes through on every rollout. Then skim <a href="https://docs.docker.com/build/building/best-practices/">Docker's "Building best practices"</a>. Compressed version: the <a href="../reference/dockerfile-for-k8s.html">Dockerfile cheat sheet</a>.</div>
+
+<div class="callout ask"><b>Questions? Ask me.</b> For example: <em>"review my real Dockerfile against these habits"</em> (remove secrets first), <em>"should model weights go inside the image or be downloaded at startup?"</em>, or <em>"what's a multi-stage build and do I need one?"</em></div>
+
+<hr>
+
+<h2>Appendix: see buffering on your own Docker machine</h2>
+<p>A 2-minute experiment for habit ①. Each run prints 0 to 4, one number per second. The only difference between the two runs is <code>PYTHONUNBUFFERED</code>. First, predict:</p>
+<div class="quiz" data-answer="1">
+  <p class="q">Run 1 has <em>no</em> <code>PYTHONUNBUFFERED</code>. When do its five numbers appear?</p>
+  <button>One per second, as they print</button>
+  <button>All together, after about five seconds</button>
+  <button>Never, because the output is lost</button>
+  <p class="why">With no terminal attached, stdout is a pipe, so Python block-buffers it. The five short lines sit in the buffer until the program exits and flushes it. They aren't lost here because the program exits normally. After a crash they would be.</p>
+</div>
+<p>Now run both commands. Click a line marked ● to see what every part means.</p>
+<div id="yx-buffer"></div>
+<p>They're identical in every shell. Copy them from here:</p>
+<p><b>PowerShell</b></p>
+<pre>docker run --rm python:3.12-slim python -c "import time; [print(i) or time.sleep(1) for i in range(5)]"
+docker run --rm -e PYTHONUNBUFFERED=1 python:3.12-slim python -c "import time; [print(i) or time.sleep(1) for i in range(5)]"</pre>
+<p><b>CMD</b></p>
+<pre>docker run --rm python:3.12-slim python -c "import time; [print(i) or time.sleep(1) for i in range(5)]"
+docker run --rm -e PYTHONUNBUFFERED=1 python:3.12-slim python -c "import time; [print(i) or time.sleep(1) for i in range(5)]"</pre>
+<p><b>macOS / Linux</b></p>
+<pre>docker run --rm python:3.12-slim python -c "import time; [print(i) or time.sleep(1) for i in range(5)]"
+docker run --rm -e PYTHONUNBUFFERED=1 python:3.12-slim python -c "import time; [print(i) or time.sleep(1) for i in range(5)]"</pre>
+<p><b>Expected:</b> run 1 shows nothing for about 5 seconds, then <code>0 1 2 3 4</code> all at once. Run 2 shows one number per second. <b>Bonus:</b> add <code>-t</code> to run 1 (<code>docker run --rm -t …</code>). Docker then attaches a terminal, Python switches to line buffering, and the numbers come out one per second even without the variable. That's why "it works on my machine" in a terminal doesn't prove your logs work in a cluster.</p>
+
+<div class="next"><span><a href="0003-from-git-push-to-running-pod.html">← Lesson 3: Git push to pod</a></span><span>Next: Services and ports →</span></div>
+</main>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/spot-line.js"></script>
+<script>
+SpotLine.mount(document.getElementById("spot"), `
+FROM python:latest
+WORKDIR /app
+COPY . .
+RUN pip install -r requirements.txt
+ENV OPENAI_API_KEY=sk-live-4f9a2c
+RUN useradd appuser
+USER appuser
+EXPOSE 8000
+CMD uvicorn app.main:app --host 0.0.0.0 --port 8000 > server.log
+`, {
+  tasks: [
+    { q: "\"With <code>runAsNonRoot: true</code> your pods fail: <code>image has non-numeric user (appuser), cannot verify user is non-root</code>.\"", answer: 7,
+      fix: "<code>USER 10001</code>. A number the kubelet can check without looking inside the image." },
+    { q: "\"Our image scanner flagged a live API key in your image.\"", answer: 5,
+      fix: "Delete the line. The app reads <code>OPENAI_API_KEY</code> from its environment, and the cluster injects it from a Secret. Rotate the leaked key." },
+    { q: "\"<code>kubectl logs</code> on your pod returns nothing at all.\"", answer: 9,
+      fix: "Drop <code>&gt; server.log</code> so output goes to stdout, and add <code>ENV PYTHONUNBUFFERED=1</code>." },
+    { q: "\"We rebuilt the same commit and got Python 3.13 instead of 3.12. A library broke.\"", answer: 1,
+      fix: "<code>FROM python:3.12-slim</code>, or pin a digest for byte-identical builds." },
+    { q: "\"Your image contains a <code>.env</code> file and your whole <code>.git</code> history.\"", answer: 3,
+      fix: "Add a <code>.dockerignore</code> listing <code>.env</code> and <code>.git</code>. Also copy <code>requirements.txt</code> first so the install step is cached." },
+    { q: "\"Each pod takes exactly 30 seconds to stop, and in-flight requests are cut off.\"", answer: 9,
+      fix: "Exec form: <code>CMD [\"uvicorn\", \"app.main:app\", \"--host\", \"0.0.0.0\", \"--port\", \"8000\"]</code>. Uvicorn becomes PID 1 and receives SIGTERM. Yes, line 9 had two problems." },
+  ],
+  notes: {
+    1: "<b>FROM python:latest</b>: the base image. <code>latest</code> is just a tag the Python maintainers move to each new release, so the same Dockerfile builds Python 3.12 today and 3.13 tomorrow. It also runs as root unless you change it.",
+    2: "<b>WORKDIR /app</b>: sets (and creates) the working directory inside the image for every later instruction. Fine as it is.",
+    3: "<b>COPY . .</b>: copies the whole build context (your repo folder) into <code>/app</code>. With no <code>.dockerignore</code>, that includes <code>.env</code>, <code>.git</code> and <code>.venv</code>. Copying everything <em>before</em> <code>pip install</code> also means any code change re-runs the slow install.",
+    4: "<b>RUN pip install -r requirements.txt</b>: installs the listed dependencies at build time. It works, but without <code>--no-cache-dir</code> pip leaves its download cache in the image, so it's bigger than needed.",
+    5: "<b>ENV OPENAI_API_KEY=sk-live-4f9a2c</b>: sets an environment variable <em>baked into the image</em>. Anyone who pulls it can read it with <code>docker inspect</code>. It's the same key for every customer, and rotating it needs a rebuild.",
+    6: "<b>RUN useradd appuser</b>: creates a Linux user named <code>appuser</code> at build time. Linux gives it a UID (usually 1000), but that number isn't written into the image config. Only the <em>name</em> is.",
+    7: "<b>USER appuser</b>: run everything after this, including the app, as <code>appuser</code>. Correct intent, but it's a <em>name</em>. The kubelet can't resolve names inside the image, so under <code>runAsNonRoot</code> it refuses to start the container.",
+    8: "<b>EXPOSE 8000</b>: documentation only. It says the app listens on 8000 and opens nothing. Fine.",
+    9: "<b>CMD uvicorn … &gt; server.log</b>: <em>shell form</em> (no JSON brackets), so Docker runs <code>/bin/sh -c \"…\"</code>. The shell is PID 1 and doesn't forward SIGTERM. <code>&gt; server.log</code> also redirects stdout into a file inside the container, so <code>kubectl logs</code> sees nothing and the file dies with the container. <code>--host 0.0.0.0 --port 8000</code> are fine.",
+  },
+});
+</script>
+<script src="../assets/yaml-explain.js"></script>
+<script>
+YamlExplain.mount(document.getElementById("yx-good"), `
+FROM python:3.12-slim
+ENV PYTHONUNBUFFERED=1
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+RUN useradd --create-home --uid 10001 appuser
+USER 10001
+EXPOSE 8000
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+`, {
+  1: "<b>FROM python:3.12-slim</b>: base image = official Python, pinned to the 3.12 line on a trimmed Debian (<code>slim</code>). A rebuild stays on 3.12. Add <code>@sha256:…</code> if the customer wants byte-identical rebuilds. <b>Answers:</b> \"Is the build reproducible?\"",
+  2: "<b>ENV PYTHONUNBUFFERED=1</b>: sets an environment variable in the image. Any non-empty value makes Python write stdout/stderr immediately instead of in blocks, so logs reach <code>kubectl logs</code> in real time. It's not a secret, so baking it in is fine. <b>Answers:</b> \"Where do your logs go?\"",
+  3: "<b>WORKDIR /app</b>: the working directory for every following instruction and for the running app. It's created if missing, owned by root.",
+  4: "<b>COPY requirements.txt .</b>: copies just the dependency list into <code>/app</code>. Doing this before the rest of the code lets Docker reuse the cached install below when only code changed.",
+  5: "<b>RUN pip install --no-cache-dir -r requirements.txt</b>: installs dependencies at <em>build</em> time. <code>-r</code> = read packages from the file. <code>--no-cache-dir</code> = don't keep pip's download cache, so the image is smaller. Runs as root, which is fine at build time.",
+  6: "<b>COPY . .</b>: copies the rest of the build context into <code>/app</code>, minus whatever <code>.dockerignore</code> lists (no <code>.env</code>, no <code>.git</code>). Files are owned by root and are readable but not writable by the app user. That's intended: the app can't modify its own code.",
+  7: "<b>RUN useradd --create-home --uid 10001 appuser</b>: creates a user at build time. <code>--uid 10001</code> = a fixed number, chosen high so it can't collide with users that exist on the base image. <code>--create-home</code> = gives it a writable <code>/home/appuser</code>, because some libraries expect a home directory for caches. <code>appuser</code> = the name, for humans only.",
+  8: "<b>USER 10001</b>: everything after this, including the running app, uses UID 10001. It's <em>numeric</em> on purpose, so the kubelet can verify \"not 0\" under <code>runAsNonRoot: true</code>. The app can now write only to <code>/tmp</code> and its home. <b>Answers:</b> \"Do you run as root?\"",
+  9: "<b>EXPOSE 8000</b>: documentation: the app listens on port 8000. Matches <code>containerPort</code> in the Deployment and <code>--port</code> below. It opens nothing by itself.",
+  10: "<b>CMD [\"uvicorn\", …]</b>: <em>exec form</em> (a JSON array, no shell), so uvicorn is PID 1 and receives SIGTERM directly. It then stops accepting connections, finishes in-flight requests and exits well within the 30s grace period. <code>app.main:app</code> = the <code>app</code> object in <code>app/main.py</code>. <code>--host 0.0.0.0</code> = listen on all interfaces so traffic from outside the container arrives. <code>--port 8000</code> = matches EXPOSE. Output goes to stdout, not a file. <b>Answers:</b> \"Does it shut down gracefully?\"",
+});
+
+YamlExplain.mount(document.getElementById("yx-buffer"), `
+docker run --rm python:3.12-slim python -c "import time; [print(i) or time.sleep(1) for i in range(5)]"
+docker run --rm -e PYTHONUNBUFFERED=1 python:3.12-slim python -c "import time; [print(i) or time.sleep(1) for i in range(5)]"
+`, {
+  1: "<b>Run 1, buffered.</b> <code>docker run</code> = create a container from an image and start it. <code>--rm</code> = delete the container when it exits, so test runs don't pile up. <code>python:3.12-slim</code> = the image, the same base as the lesson's Dockerfile, downloaded on first use. Everything after the image name is the command run inside the container, replacing the image's default <code>CMD</code>. <code>python -c \"…\"</code> = run this string as Python code instead of a script file. <code>import time</code> = load the sleep function. <code>[… for i in range(5)]</code> = loop over i = 0 to 4. <code>print(i) or time.sleep(1)</code> = print the number, then wait 1 second. <code>print</code> returns <code>None</code>, so <code>or</code> runs the sleep too, which squeezes both into one expression. There's deliberately <em>no</em> <code>-t</code>, so stdout is a pipe, exactly like in a Kubernetes pod.",
+  2: "<b>Run 2, unbuffered.</b> Identical, plus <code>-e PYTHONUNBUFFERED=1</code>. <code>-e NAME=value</code> sets an environment variable inside the container, which has the same effect as <code>ENV PYTHONUNBUFFERED=1</code> in the Dockerfile. Any non-empty value works, and <code>1</code> is the convention. Python now writes each <code>print</code> immediately.",
+});
+
+YamlExplain.mount(document.getElementById("yx-ignore"), `
+.git
+.venv
+.env
+__pycache__
+*.pyc
+`, {
+  1: "<b>.git</b>: your full Git history. It's large, useless at runtime, and may contain old secrets in past commits. Never ship it.",
+  2: "<b>.venv</b>: your local virtual environment. It's built for <em>your</em> machine (Windows binaries), so it would break inside a Linux image, and <code>pip install</code> already provides the dependencies.",
+  3: "<b>.env</b>: your local secrets file. This is the line that keeps your dev API keys out of every customer's copy of the image.",
+  4: "<b>__pycache__</b>: Python's compiled-bytecode folders, regenerated automatically. Skipping them keeps builds clean and cache-friendly.",
+  5: "<b>*.pyc</b>: a glob for stray compiled-bytecode files anywhere in the tree. Same reason as line 4.",
+});
+</script>
+</body></html>

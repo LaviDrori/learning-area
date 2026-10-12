@@ -31,6 +31,23 @@
 - [Kubernetes The Hard Way (Kelsey Hightower)](https://github.com/kelseyhightower/kubernetes-the-hard-way)
   Builds a cluster component by component. Use for: the "operate clusters" phase, after the basics.
 
+- [Docs: Pod Lifecycle, Termination of Pods (kubernetes.io)](https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-termination)
+  SIGTERM to the main process, STOPSIGNAL, 30s default grace period, SIGKILL, terminating endpoints. Use for: shutdown behaviour, rollouts.
+- [Docs: Logging Architecture (kubernetes.io)](https://kubernetes.io/docs/concepts/cluster-administration/logging/)
+  stdout/stderr as the standard, how `kubectl logs` reads them, rotation (10Mi × 5 by default). Use for: "where are your logs?"
+- [Docs: Pod Security Standards (kubernetes.io)](https://kubernetes.io/docs/concepts/security/pod-security-standards/)
+  Privileged / Baseline / Restricted profiles and their exact field rules (runAsNonRoot, runAsUser ≠ 0). Use for: security-context questions. Raw source on GitHub is easier to grep.
+- [Pod API reference: SecurityContext (kubernetes.io)](https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-v1/)
+  Field-level truth for runAsUser ("Defaults to user specified in image metadata"), runAsNonRoot. Use for: exact semantics. (Huge page; `kubernetes/api` core/v1/types.go has the same text.)
+- [Dockerfile reference (docs.docker.com)](https://docs.docker.com/reference/dockerfile/)
+  Every instruction; shell vs exec form ("does not pass signals"); USER; ARG secrets warning. Use for: any Dockerfile line.
+- [Docker docs: Build secrets](https://docs.docker.com/build/building/secrets/)
+  "Build arguments and environment variables are inappropriate for passing secrets… they persist in the final image." Use for: secrets-in-image questions.
+- [Docker docs: Building best practices](https://docs.docker.com/build/building/best-practices/)
+  Official Dockerfile hygiene guide. Use for: image size, caching, USER.
+- [Python docs: PYTHONUNBUFFERED / sys.stdout buffering](https://docs.python.org/3/using/cmdline.html#envvar-PYTHONUNBUFFERED)
+  Non-interactive stdout is block-buffered; the env var disables it. Use for: Python logging in containers.
+
 ## Wisdom (Communities)
 
 - [Kubernetes Slack](https://slack.k8s.io/) → kubernetes.slack.com, 170+ channels
