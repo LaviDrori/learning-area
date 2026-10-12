@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deployment Cheat Sheet</title>
+<link rel="stylesheet" href="../assets/course.css">
+<style>
+  pre .c { color: var(--muted); }
+  .name { font-family: var(--mono); font-size: .9rem; word-break: break-all; }
+  .name span { border-bottom: 3px solid; padding: 0 .15rem; }
+</style>
+</head>
+<body><main>
+<div class="crumbs">Lessons: <a href="../lessons/0001-desired-state-and-the-control-loop.html">1</a> · <a href="../lessons/0002-reading-a-deployment-manifest.html">2</a> · Reference: <a href="glossary.html">Glossary</a></div>
+<h1>Deployment Cheat Sheet</h1>
+<p class="subtitle">Read any Deployment manifest and its <code>kubectl get</code> output. Source: <a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/">kubernetes.io, Deployments</a>.</p>
+
+<h2>The manifest, annotated</h2>
+<pre>apiVersion: apps/v1            <span class="c"># API group/version</span>
+kind: Deployment               <span class="c"># which object (and so which controller)</span>
+metadata:
+  name: nginx-deployment       <span class="c"># prefix of every ReplicaSet and Pod name</span>
+  labels: {app: nginx}         <span class="c"># labels on the Deployment itself (not the selector's target)</span>
+spec:                          <span class="c"># ── Deployment's desired state ──</span>
+  replicas: 3                  <span class="c"># scaling: no rollout</span>
+  selector:                    <span class="c"># which pods are mine. REQUIRED, IMMUTABLE</span>
+    matchLabels: {app: nginx}  <span class="c"># must match template labels, or the API rejects it</span>
+  template:                    <span class="c"># ── Pod blueprint: any change here = rollout ──</span>
+    metadata:
+      labels: {app: nginx}     <span class="c"># stamped on every pod (+ pod-template-hash)</span>
+    spec:                      <span class="c"># ── each Pod's spec ──</span>
+      containers:
+      - name: nginx
+        image: nginx:1.14.2    <span class="c"># repository:tag</span>
+        ports:
+        - containerPort: 80    <span class="c"># port the app listens on</span></pre>
+
+<h2>Decoding a pod name</h2>
+<p class="name"><span style="border-color:var(--accent)">nginx-deployment</span>-<span style="border-color:var(--warn)">75675f5897</span>-<span style="border-color:var(--good)">7ci7o</span></p>
+<p>Deployment name · pod-template-hash · random suffix. <b>ReplicaSet name = first two parts.</b> One app showing two different hashes means a rollout is happening or stuck.</p>
+
+<h2>Ownership chain</h2>
+<p>Deployment <em>(Deployment controller)</em> → ReplicaSet <em>(ReplicaSet controller)</em> → Pods <em>(scheduler + kubelet)</em>. Don't manage a ReplicaSet owned by a Deployment.</p>
+
+<h2>Which edit does what</h2>
+<table>
+<tr><th>Change</th><th>Rollout?</th><th>ReplicaSets</th><th>Pod names</th></tr>
+<tr><td><code>replicas</code></td><td>No</td><td>Same one, new DESIRED</td><td>Existing kept</td></tr>
+<tr><td>anything in <code>template</code> (image, labels, env…)</td><td>Yes</td><td>New one scales up; old one goes to 0 and is kept</td><td>All new</td></tr>
+<tr><td>Back to an earlier template</td><td>Yes</td><td>The old ReplicaSet (same hash) scales back up</td><td>All new</td></tr>
+<tr><td><code>selector</code></td><td colspan="3">Not allowed. Delete and recreate the Deployment (deletes pods by default → downtime)</td></tr>
+</table>
+
+<h2>Reading <code>kubectl get</code></h2>
+<table>
+<tr><th>Command</th><th>Column</th><th>Meaning</th></tr>
+<tr><td rowspan="3"><code>get deployments</code></td><td>READY</td><td>available / desired</td></tr>
+<tr><td>UP-TO-DATE</td><td>replicas already running the latest template</td></tr>
+<tr><td>AVAILABLE</td><td>replicas available to users</td></tr>
+<tr><td rowspan="3"><code>get rs</code></td><td>DESIRED</td><td>desired replicas (desired state)</td></tr>
+<tr><td>CURRENT</td><td>replicas currently running</td></tr>
+<tr><td>READY</td><td>replicas available to users</td></tr>
+<tr><td><code>get pods --show-labels</code></td><td>LABELS</td><td>includes <code>pod-template-hash=…</code></td></tr>
+</table>
+
+<h2>Handy commands</h2>
+<pre>kubectl apply -f deployment.yaml              <span class="c"># submit desired state</span>
+kubectl get deployments / rs / pods           <span class="c"># the three layers</span>
+kubectl get pods --show-labels                <span class="c"># see labels incl. hash</span>
+kubectl get deployment &lt;name&gt; -o yaml         <span class="c"># full object: spec AND status</span></pre>
+</main></body></html>

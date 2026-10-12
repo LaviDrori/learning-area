@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kubernetes Glossary</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body><main>
+<div class="crumbs">Lessons: <a href="../lessons/0001-desired-state-and-the-control-loop.html">1</a> · <a href="../lessons/0002-reading-a-deployment-manifest.html">2</a> · Reference: <a href="deployment-manifest.html">Deployment cheat sheet</a></div>
+<h1>Glossary</h1>
+<p class="subtitle">The course's single source of truth for terms. Lessons use these words exactly as defined here. Definitions are quoted or adapted from <a href="https://kubernetes.io/docs/reference/glossary/">kubernetes.io</a>.</p>
+
+<h2>Core ideas</h2>
+<table>
+<tr><th>Term</th><th>Meaning</th><th>From</th></tr>
+<tr><td><b>Container</b></td><td>Packaging of an app plus its runtime dependencies, so it runs the same anywhere.</td><td><a href="https://kubernetes.io/docs/concepts/containers/">docs</a> · L1</td></tr>
+<tr><td><b>Container image</b></td><td>Ready-to-run package: code, runtime, libraries, default settings. A container is a running instance of an image.</td><td><a href="https://kubernetes.io/docs/concepts/containers/">docs</a> · L1</td></tr>
+<tr><td><b>Desired state</b></td><td>What you <i>want</i> the cluster to look like. Stored in an object's <code>spec</code>.</td><td><a href="https://kubernetes.io/docs/concepts/architecture/controller/">docs</a> · L1</td></tr>
+<tr><td><b>Current state</b></td><td>What the cluster actually looks like right now. Reported in an object's <code>status</code>.</td><td><a href="https://kubernetes.io/docs/concepts/architecture/controller/">docs</a> · L1</td></tr>
+<tr><td><b>Control loop / reconciliation</b></td><td>A never-ending loop: observe current state → compare with desired → act to close the gap. Like a thermostat.</td><td><a href="https://kubernetes.io/docs/concepts/architecture/controller/">docs</a> · L1</td></tr>
+<tr><td><b>Controller</b></td><td>A control loop for one kind of object (e.g. ReplicaSet controller keeps N pods alive). It acts by asking the API server, not by running containers itself.</td><td><a href="https://kubernetes.io/docs/concepts/architecture/controller/">docs</a> · L1</td></tr>
+<tr><td><b>Pod</b></td><td>The smallest deployable unit: one or more containers that share network and storage. Disposable. You rarely create them directly.</td><td><a href="https://kubernetes.io/docs/concepts/workloads/pods/">docs</a> · L1</td></tr>
+<tr><td><b>Cluster</b></td><td>A control plane plus a set of worker nodes.</td><td><a href="https://kubernetes.io/docs/concepts/overview/components/">docs</a> · L1</td></tr>
+<tr><td><b>Node</b></td><td>A worker machine (VM or physical) that runs pods.</td><td><a href="https://kubernetes.io/docs/concepts/architecture/nodes/">docs</a> · L1</td></tr>
+</table>
+
+<h2>Manifests &amp; workloads</h2>
+<table>
+<tr><th>Term</th><th>Meaning</th><th>From</th></tr>
+<tr><td><b>Object</b></td><td>A record of intent stored in the API (a Deployment, a Pod, …). Has <code>spec</code> (you write) and <code>status</code> (the system writes).</td><td><a href="https://kubernetes.io/docs/concepts/overview/working-with-objects/">docs</a> · L2</td></tr>
+<tr><td><b>Manifest</b></td><td>A YAML/JSON file describing an object. Required fields: <code>apiVersion</code>, <code>kind</code>, <code>metadata</code>, <code>spec</code>.</td><td><a href="https://kubernetes.io/docs/concepts/overview/working-with-objects/">docs</a> · L2</td></tr>
+<tr><td><b>kubectl apply</b></td><td>Sends a manifest to the API server: "make this the desired state".</td><td>L2</td></tr>
+<tr><td><b>Deployment</b></td><td>Workload object for stateless apps. Owns ReplicaSets; handles scaling, rollouts and rollbacks.</td><td><a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/">docs</a> · L2</td></tr>
+<tr><td><b>ReplicaSet</b></td><td>Keeps N identical pods running. Named <code>[DEPLOYMENT-NAME]-[HASH]</code>. Don't manage one owned by a Deployment directly.</td><td><a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/">docs</a> · L2</td></tr>
+<tr><td><b>Pod template</b></td><td><code>spec.template</code>: the blueprint for every pod. Changing it (and only it) triggers a <b>rollout</b>.</td><td><a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/">docs</a> · L2</td></tr>
+<tr><td><b>pod-template-hash</b></td><td>Label added by the Deployment controller: a hash of the pod template. Same template, same hash. Never edit it.</td><td><a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#pod-template-hash-label">docs</a> · L2</td></tr>
+<tr><td><b>Rollout</b></td><td>Replacing pods with ones from a new template: a new ReplicaSet scales up while the old one scales to 0.</td><td><a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#updating-a-deployment">docs</a> · L2</td></tr>
+<tr><td><b>Label</b></td><td>Key/value pair attached to an object, e.g. <code>app: nginx</code>. Not unique; many objects share labels.</td><td><a href="https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/">docs</a> · L2</td></tr>
+<tr><td><b>Label selector</b></td><td>A query over labels that picks a set of objects. "The core grouping primitive." A Deployment's selector must match its template labels and is immutable.</td><td><a href="https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/">docs</a> · L2</td></tr>
+</table>
+
+<h2>Control plane, the brain</h2>
+<table>
+<tr><th>Component</th><th>Job, in one line</th></tr>
+<tr><td><b>kube-apiserver</b></td><td>The front door. Every read/write (yours, and every component's) goes through its HTTP API.</td></tr>
+<tr><td><b>etcd</b></td><td>Consistent, highly-available key-value store holding all cluster data, desired state included.</td></tr>
+<tr><td><b>kube-scheduler</b></td><td>Finds pods with no node yet and picks a suitable node for each.</td></tr>
+<tr><td><b>kube-controller-manager</b></td><td>Runs the built-in controllers (ReplicaSet, Node, Job, …).</td></tr>
+<tr><td><b>cloud-controller-manager</b></td><td>Optional. Talks to the cloud provider (load balancers, node VMs).</td></tr>
+</table>
+
+<h2>Node components, the hands</h2>
+<table>
+<tr><th>Component</th><th>Job, in one line</th></tr>
+<tr><td><b>kubelet</b></td><td>Agent on every node. Makes sure the pods assigned to its node are running and restarts crashed containers.</td></tr>
+<tr><td><b>Container runtime</b></td><td>Software that actually runs containers (e.g. containerd).</td></tr>
+<tr><td><b>kube-proxy</b></td><td>Optional. Maintains network rules on the node that implement Services.</td></tr>
+</table>
+<p class="note">Component one-liners adapted from <a href="https://kubernetes.io/docs/concepts/overview/components/">Kubernetes Components</a>.</p>
+
+<h2>Three failures, three different healers</h2>
+<table>
+<tr><th>What broke</th><th>Who fixes it</th><th>Pod name changes?</th></tr>
+<tr><td>Container crashes</td><td>kubelet restarts it in place</td><td>No, restart count goes up</td></tr>
+<tr><td>Pod deleted</td><td>ReplicaSet controller creates a replacement</td><td>Yes</td></tr>
+<tr><td>Node dies</td><td>Node controller evicts, ReplicaSet replaces, scheduler places it elsewhere</td><td>Yes</td></tr>
+<tr><td>API server down</td><td>Nobody can act until it's back. Running pods keep running; nothing new happens. HA clusters run 3+ API servers behind a load balancer.</td><td>n/a</td></tr>
+</table>
+</main></body></html>

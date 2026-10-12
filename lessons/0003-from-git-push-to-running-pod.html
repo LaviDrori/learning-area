@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Git Push to Pod</title>
+<link rel="stylesheet" href="../assets/course.css">
+<style>
+  .name { font-family: var(--mono); font-size: .95rem; text-align: center; margin: 1.4rem 0 .4rem; word-break: break-all; }
+  .name span { padding: .1rem .2rem; border-bottom: 3px solid; }
+  .legend { font-size: .8rem; text-align: center; color: var(--muted); }
+  .pipe svg text { font-family: var(--mono); font-size: 12px; fill: var(--fg); }
+  .pipe svg .lbl { font-family: var(--serif); font-style: italic; font-size: 12px; fill: var(--muted); }
+  .pipe svg rect { fill: var(--panel); stroke: var(--rule); }
+  .pipe svg .k8s { stroke: var(--accent); }
+  .pipe svg line, .pipe svg path { stroke: var(--accent); stroke-width: 1.4; fill: none; marker-end: url(#a3); }
+  .pipe svg .no { stroke: var(--bad); stroke-dasharray: 4 3; marker-end: none; }
+  .pipe svg .notext { fill: var(--bad); font-family: var(--serif); font-style: italic; }
+  details { margin: .8rem 0; }
+  summary { cursor: pointer; font-weight: 600; }
+  .story { border-left: 3px solid var(--rule); padding-left: 1rem; margin: 1rem 0; }
+  .story ol { padding-left: 1.2rem; }
+</style>
+</head>
+<body><main>
+<div class="crumbs">Kubernetes · Lesson 3 · <a href="0002-reading-a-deployment-manifest.html">Lesson 2</a> · <a href="../reference/glossary.html">Glossary</a> · <a href="../reference/git-to-pod.html">Git-to-pod cheat sheet</a></div>
+
+<h1>From <code>git push</code> to a Running Pod</h1>
+<p class="subtitle">The end-to-end path your app takes into a customer's cluster. ~25 minutes.</p>
+
+<div class="goal"><strong>Your win today:</strong> trace your app from your GitHub repo to a running pod in a customer's cluster, naming every hop. You'll also understand what a customer's DevOps team means by <em>registry</em>, <em>tag</em>, <em>pull secret</em>, <em>GitOps</em> and <em>ImagePullBackOff</em>.</div>
+
+<h2>0. Warm-up <span class="score"></span></h2>
+<div class="quiz" data-answer="2">
+  <p class="q">You change <em>only</em> the image tag in a Deployment and apply. What does <code>kubectl get rs</code> show?</p>
+  <button>The same ReplicaSet with a new DESIRED</button>
+  <button>No change at all until pods restart</button>
+  <button>A new ReplicaSet with a new hash</button>
+  <p class="why">The image is inside the pod template, so the template changes. That gives a new <code>pod-template-hash</code> and a new ReplicaSet (Lesson 2). Keep this in mind: shipping a new version of your app <em>is</em> a tag change.</p>
+</div>
+<div class="quiz" data-answer="0">
+  <p class="q">Which component actually gets the container running on a node?</p>
+  <button>kubelet, via the container runtime</button>
+  <button>kube-scheduler, after picking a node</button>
+  <button>kube-apiserver, from its etcd records</button>
+  <p class="why">The scheduler only picks the node. The <b>kubelet</b> on that node tells the <b>container runtime</b> to start the container, and the runtime has to <em>pull the image first</em>. That pull is today's missing piece.</p>
+</div>
+
+<h2>1. Pods never talk to GitHub</h2>
+<p>It's a natural guess that a pod "runs your repo". It doesn't. A pod runs a <b>container image</b>, and images live in a <b>container registry</b>: a server that stores images, such as GitHub's <code>ghcr.io</code>, Docker Hub, or a cloud provider's registry. The official docs describe the order: "You typically create a container image of your application and push it to a registry before referring to it in a Pod"<span class="note"><a href="https://kubernetes.io/docs/concepts/containers/images/">kubernetes.io, Images</a>.</span>.</p>
+<figure class="pipe">
+<svg viewBox="0 0 640 200" role="img" aria-label="Your repo is built by CI into an image pushed to a registry. The cluster pulls from the registry. There is no direct link from the cluster to the repo.">
+  <defs><marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)" stroke="none"/></marker></defs>
+  <rect x="10" y="30" width="130" height="50" rx="5"/><text x="75" y="52" text-anchor="middle">GitHub repo</text><text x="75" y="68" text-anchor="middle" font-size="10">code + Dockerfile</text>
+  <rect x="180" y="30" width="120" height="50" rx="5"/><text x="240" y="52" text-anchor="middle">CI build</text><text x="240" y="68" text-anchor="middle" font-size="10">docker build</text>
+  <rect x="340" y="30" width="130" height="50" rx="5"/><text x="405" y="52" text-anchor="middle">Registry</text><text x="405" y="68" text-anchor="middle" font-size="10">image:v1.4.0</text>
+  <rect class="k8s" x="500" y="20" width="130" height="160" rx="6"/><text x="565" y="42" text-anchor="middle">Customer</text><text x="565" y="58" text-anchor="middle">cluster</text>
+  <text x="565" y="110" text-anchor="middle" font-size="10">kubelet pulls</text><text x="565" y="124" text-anchor="middle" font-size="10">the image</text>
+  <line x1="142" y1="55" x2="178" y2="55"/><line x1="302" y1="55" x2="338" y2="55"/>
+  <path d="M498,110 C470,110 440,100 420,82" />
+  <text class="lbl" x="440" y="130">pull</text>
+  <path class="no" d="M75,82 C75,170 400,175 498,165"/><text class="notext" x="230" y="185" font-size="12">✗ no direct link: pods never clone your repo</text>
+</svg>
+<figcaption>The repo and the cluster never meet. The <b>registry</b> sits between them, and the <b>image tag</b> is how they refer to the same version.</figcaption>
+</figure>
+
+<h2>2. Walk the pipeline, hop by hop</h2>
+<p>Here's a realistic day: you ship version <code>v1.4.0</code> of an AI app, <code>forecast-api</code>, to a customer. Before each <b>next hop</b>, guess what comes next.</p>
+<div id="flow"></div>
+
+<h2>3. Image names: read them like an address</h2>
+<p class="name"><span style="border-color:var(--accent)">ghcr.io</span>/<span style="border-color:var(--warn)">acme/forecast-api</span>:<span style="border-color:var(--good)">v1.4.0</span></p>
+<p class="legend"><b style="color:var(--accent)">registry host</b> · <b style="color:var(--warn)">image path</b> · <b style="color:var(--good)">tag</b></p>
+<ul>
+  <li><b>No registry host?</b> "If you don't specify a registry hostname, Kubernetes assumes that you mean the Docker public registry." So <code>nginx:1.14.2</code> from Lesson 2 came from Docker Hub.</li>
+  <li><b>Tags can move</b>; <b>digests can't.</b> "Digests are hashes of the image's content, and are immutable. Tags can be moved to point to different images, but digests are fixed." A digest looks like <code>forecast-api@sha256:45b2…</code>.</li>
+  <li><b>Avoid <code>:latest</code>.</b> "It is harder to track which version of the image is running and more difficult to roll back properly. Instead, specify a meaningful tag such as <code>v1.42.0</code> and/or a digest."</li>
+</ul>
+<p class="note">All three quotes: <a href="https://kubernetes.io/docs/concepts/containers/images/">kubernetes.io, Images</a>.</p>
+<p>When does the kubelet re-download an image? That's set by <code>imagePullPolicy</code>. If you don't set it, Kubernetes picks a default<span class="note"><a href="https://kubernetes.io/docs/concepts/containers/images/#imagepullpolicy-defaulting">Images, "Default image pull policy"</a>.</span>:</p>
+<table>
+<tr><th>Image reference</th><th>Default policy</th><th>Meaning</th></tr>
+<tr><td><code>:v1.4.0</code> (a real tag)</td><td><code>IfNotPresent</code></td><td>Pull only if the node doesn't already have it</td></tr>
+<tr><td><code>:latest</code> or no tag</td><td><code>Always</code></td><td>Check the registry every time a container starts</td></tr>
+<tr><td><code>@sha256:…</code> (digest)</td><td><code>IfNotPresent</code></td><td>Content can't change, so a cached copy is safe</td></tr>
+</table>
+<div class="callout"><b>Classic trap:</b> you rebuild and re-push <em>the same tag</em> <code>v1.4.0</code> with a fix. Nodes that already pulled <code>v1.4.0</code> may keep running the <em>old</em> image, because <code>IfNotPresent</code> sees it's present. And since the manifest didn't change, no rollout happens either. Rule: <b>every build gets a new tag.</b></div>
+
+<h2>4. Who changes the desired state? Two styles</h2>
+<p>Hop 4 in the walkthrough, updating the tag in a manifest, can happen in two ways. Customers will tell you which one they use:</p>
+<table>
+<tr><th></th><th>Push style ("CI deploys")</th><th>GitOps style</th></tr>
+<tr><td>How</td><td>The CI pipeline runs <code>kubectl apply</code> (or <code>helm upgrade</code>) against the cluster</td><td>Someone commits the new tag to a <b>config repo</b>, and a tool <em>inside</em> the cluster syncs it</td></tr>
+<tr><td>Source of truth</td><td>Whatever was last applied</td><td>The config Git repo</td></tr>
+<tr><td>Typical tools</td><td>GitHub Actions, GitLab CI, Jenkins</td><td><a href="https://argo-cd.readthedocs.io/en/stable/">Argo CD</a>, Flux</td></tr>
+<tr><td>Who needs cluster credentials</td><td>The CI system</td><td>Only the in-cluster tool</td></tr>
+</table>
+<p>GitOps is Lesson 1's idea one level up. Argo CD is "a declarative, GitOps continuous delivery tool for Kubernetes" that uses "Git repositories as the source of truth for defining the desired application state." It compares the cluster with Git, and "a deployed application whose live state deviates from the target state is considered <code>OutOfSync</code>"<span class="note"><a href="https://argo-cd.readthedocs.io/en/stable/">Argo CD docs</a>, overview. Whether it automatically reverts drift depends on its sync settings.</span>. In other words, Git is the thermostat setting and Argo CD is the thermostat.</p>
+<div class="callout"><b>So, "how do pods connect to GitHub?"</b> They connect in two places, and in neither one does a pod touch GitHub. (1) Your <b>app repo</b> → CI → <b>image in a registry</b> → pulled by the kubelet. (2) With GitOps, a <b>config repo</b> holding manifests → read by Argo CD → applied through the API server. Often these are <em>two different repos</em>, and with customers the config repo is usually <em>theirs</em>.</div>
+
+<h2>5. Day-to-day stories</h2>
+<div class="story">
+<h3>Story A: shipping a bug fix (GitOps customer)</h3>
+<ol>
+  <li>You fix a bug in <code>forecast-api</code>, merge, and tag the commit <code>v1.4.1</code>.</li>
+  <li>GitHub Actions builds the image and pushes <code>ghcr.io/acme/forecast-api:v1.4.1</code>.</li>
+  <li>You tell the customer, and their DevOps engineer opens a pull request in <em>their</em> config repo changing <code>v1.4.0</code> → <code>v1.4.1</code>.</li>
+  <li>After merge, Argo CD shows <code>OutOfSync</code>, then syncs. The Deployment's template changed, so a new ReplicaSet appears (Lesson 2) and pods are replaced.</li>
+  <li>If something breaks, they revert the PR. Because the old template returns, so does the old hash and the old ReplicaSet.</li>
+</ol>
+</div>
+<div class="story">
+<h3>Story B: "our cluster can't reach ghcr.io"</h3>
+<p>Many enterprise clusters can't pull from the public internet. The customer copies (mirrors) your image into their own registry, e.g. <code>registry.customer.internal/vendors/forecast-api:v1.4.1</code>, and points the Deployment's <code>image:</code> at that. <b>What this means for you:</b> never hard-code the image location anywhere they can't change it. Ship versioned images, and make the image an easily overridden value in your manifests.</p>
+</div>
+<div class="story">
+<h3>Story C: "your pods are stuck in ImagePullBackOff"</h3>
+<p>"The status <code>ImagePullBackOff</code> means that a container could not start because Kubernetes could not pull a container image (for reasons such as invalid image name, or pulling from a private registry without <code>imagePullSecret</code>). The <code>BackOff</code> part indicates that Kubernetes will keep trying to pull the image, with an increasing back-off delay"<span class="note"><a href="https://kubernetes.io/docs/concepts/containers/images/#imagepullbackoff">Images, "ImagePullBackOff"</a>. The delay caps at 5 minutes.</span>. Your checklist: <b>Does that exact tag exist in the registry? Is the registry private? If so, does the pod have <code>imagePullSecrets</code>? Can their nodes reach the registry?</b></p>
+</div>
+
+<h2>6. The actual files</h2>
+<p>Three small files make up the whole pipeline. Expand them. They're simplified sketches, not copy-paste production files.</p>
+<details><summary>Dockerfile (in your app repo): how the image is built</summary>
+<pre>FROM python:3.12-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+EXPOSE 8000
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]</pre>
+<p class="note">Lesson 4 is about making this Kubernetes-friendly: logs, shutdown signals, non-root, no secrets baked in.</p>
+</details>
+<details><summary>.github/workflows/image.yml (in your app repo): CI builds and pushes on each version tag</summary>
+<pre>name: build-and-push-image
+on:
+  push:
+    tags: ["v*"]                 # runs when you push a tag like v1.4.1
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    permissions: { contents: read, packages: write }
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          push: true
+          tags: ghcr.io/acme/forecast-api:${{ github.ref_name }}   # → :v1.4.1</pre>
+<p class="note">Structure follows GitHub's <a href="https://docs.github.com/en/actions/use-cases-and-examples/publishing-packages/publishing-docker-images">"Publishing Docker images"</a> guide, which pins each action to an exact commit SHA. Copy versions from there for real use.</p>
+</details>
+<details><summary>deployment.yaml (often in the customer's config repo): where the tag lands</summary>
+<pre>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: forecast-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: forecast-api }
+  template:
+    metadata:
+      labels: { app: forecast-api }
+    spec:
+      imagePullSecrets:              # credentials for a private registry
+      - name: regcred                # a Secret the customer creates
+      containers:
+      - name: forecast-api
+        image: ghcr.io/acme/forecast-api:v1.4.1   # ← the hand-off point
+        ports:
+        - containerPort: 8000</pre>
+<p class="note"><code>imagePullSecrets</code> "specifies that Kubernetes should get the credentials from a Secret named <code>regcred</code>". See <a href="https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/">Pull an Image from a Private Registry</a>.</p>
+</details>
+
+<hr>
+
+<h2>7. A customer asks… <span class="score"></span></h2>
+
+<div class="quiz" data-answer="1">
+  <p class="q">"Does our cluster need access to your GitHub repo to run the app?"</p>
+  <button>Yes, every pod clones the repo on startup</button>
+  <button>No, only to the registry holding your image</button>
+  <button>Only the scheduler needs it, to pick nodes</button>
+  <p class="why">Nodes pull <em>images</em> from a <em>registry</em>. Only CI reads your app repo. If they use GitOps, their Argo CD reads <em>their</em> config repo, not your code.</p>
+</div>
+
+<div class="quiz" data-answer="0">
+  <p class="q">The customer mirrored your image into their private registry. New pods now show <code>ImagePullBackOff</code>. Most likely cause?</p>
+  <button>The pods lack an imagePullSecret for that registry</button>
+  <button>The Dockerfile is missing an EXPOSE port line</button>
+  <button>The Service selector does not match pod labels</button>
+  <p class="why">Pulling from a private registry without credentials is one of the two textbook causes in the docs (the other is a wrong image name or tag). EXPOSE and Service selectors don't affect pulling at all.</p>
+</div>
+
+<div class="quiz" data-answer="2">
+  <p class="q">"Please don't send us images tagged <code>:latest</code>." Why do they care?</p>
+  <button>Kubernetes refuses to run images tagged latest at all</button>
+  <button>Latest images are larger and much slower to pull</button>
+  <button>It hides which version runs and breaks clean rollbacks</button>
+  <p class="why">From the docs: with <code>:latest</code> "it is harder to track which version of the image is running and more difficult to roll back properly." Kubernetes will run it; operators just hate it.</p>
+</div>
+
+<div class="quiz" data-answer="1">
+  <p class="q">You pushed <code>forecast-api:v1.4.2</code> to the registry an hour ago, but the customer's pods still run v1.4.1. Why?</p>
+  <button>The pods only check the registry once a day</button>
+  <button>The desired state still names the old tag</button>
+  <button>The registry must first restart every node's kubelet</button>
+  <p class="why">A registry is passive storage, and pushing to it changes nothing in the cluster. Someone (CI or a config-repo commit) must change <code>image:</code> in the Deployment. That's a template change, so a rollout follows.</p>
+</div>
+
+<div class="quiz" data-answer="0">
+  <p class="q">The customer uses Argo CD. An engineer changes the Deployment directly with <code>kubectl edit</code>, bypassing Git. What does Argo CD report?</p>
+  <button>OutOfSync, since live state now differs from Git</button>
+  <button>Synced, since the cluster is the real truth</button>
+  <button>Nothing, since it only reads Git at install</button>
+  <p class="why">Git is the desired state, so live ≠ target means <code>OutOfSync</code>. Whether Argo CD then reverts the manual change automatically depends on how its sync policy is configured.</p>
+</div>
+
+<div class="quiz" data-answer="2">
+  <p class="q">A customer wants your image referenced as <code>forecast-api@sha256:…</code> instead of <code>:v1.4.2</code>. What do they gain?</p>
+  <button>Digests download faster because they skip some layers</button>
+  <button>Digests let pods pull images straight from GitHub repos</button>
+  <button>Digests are immutable, while a tag can be moved later</button>
+  <p class="why">A tag is a movable label; a digest is a hash of the content. Pinning by digest guarantees every node runs byte-for-byte the same image, even if someone re-pushes the tag.</p>
+</div>
+
+<hr>
+
+<div class="callout source"><b>Primary source, read this next (~15 min):</b> <a href="https://kubernetes.io/docs/concepts/containers/images/">kubernetes.io, Images</a>. Read "Image names", "Updating images" and "ImagePullBackOff". For the GitOps side, the one-page <a href="https://argo-cd.readthedocs.io/en/stable/">Argo CD overview</a>. Compressed version: the <a href="../reference/git-to-pod.html">Git-to-pod cheat sheet</a>.</div>
+
+<div class="callout ask"><b>Questions? Ask me.</b> For example: <em>"what would our GitHub Actions workflow look like for my real app?"</em>, <em>"what's Helm and how does it relate to this?"</em>, or <em>"how do customers usually give us access to their registry?"</em> If you share one of your real Dockerfiles (with secrets removed), Lesson 4 can use it as the example.</div>
+
+<div class="next"><span><a href="0002-reading-a-deployment-manifest.html">← Lesson 2: Deployments</a></span><span>Next: A Kubernetes-friendly Dockerfile →</span></div>
+</main>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/flow-stepper.js"></script>
+<script>
+FlowStepper.mount(document.getElementById("flow"), [
+  { title: "git push", who: "You · app repo on GitHub",
+    what: "You merge the feature and push a version tag. The repo holds <b>source code + a Dockerfile</b>, the recipe for building the image. Nothing in any cluster knows yet.",
+    artifact: "git tag v1.4.0 && git push --tags" },
+  { title: "CI builds the image", who: "GitHub Actions (CI)",
+    what: "The push triggers a workflow. It checks out the code and runs the equivalent of <code>docker build</code>, which turns the Dockerfile into a <b>container image</b>: code, Python runtime, libraries, all sealed together.",
+    artifact: "docker build -t ghcr.io/acme/forecast-api:v1.4.0 .",
+    ask: "\"Is the build reproducible? Can we build it ourselves from your repo?\"" },
+  { title: "push to registry", who: "GitHub Actions → container registry",
+    what: "CI pushes the image to a <b>registry</b>, here GitHub's <code>ghcr.io</code>. The registry is just storage: it serves images to whoever has access. The <b>tag</b> <code>v1.4.0</code> names this exact build.",
+    artifact: "ghcr.io/acme/forecast-api:v1.4.0",
+    ask: "\"Is the registry public or private? Can we mirror the image into ours?\"" },
+  { title: "update desired state", who: "CI pipeline, or the customer's config repo (GitOps)",
+    what: "Someone changes the Deployment's <code>image:</code> to the new tag. This is the <b>hand-off</b> between \"build\" and \"run\". Either CI runs <code>kubectl apply</code>, or a commit to a config repo is picked up by Argo CD (section 4).",
+    artifact: "image: ghcr.io/acme/forecast-api:v1.4.0",
+    ask: "\"Do you provide manifests or a Helm chart? We use Argo CD.\"" },
+  { title: "API server → new ReplicaSet", who: "Control plane",
+    what: "The API server stores the new spec in etcd. The template changed, so the Deployment controller creates a <b>new ReplicaSet</b> (new hash), which creates new Pods. This is Lesson 2 in action.",
+    artifact: "forecast-api-6f9c7d8b4d   DESIRED 2" },
+  { title: "schedule + pull the image", who: "kube-scheduler, then kubelet + container runtime",
+    what: "The scheduler assigns each pod to a node. That node's kubelet asks the container runtime to start it, but first the runtime must <b>pull the image from the registry</b>. Private registry? The pod needs <code>imagePullSecrets</code>. Wrong tag or no access gives <code>ImagePullBackOff</code>.",
+    artifact: "Pulling image \"ghcr.io/acme/forecast-api:v1.4.0\"",
+    ask: "\"Your pods are stuck in ImagePullBackOff.\"" },
+  { title: "container runs", who: "kubelet",
+    what: "The image is on the node and the container starts: your <code>CMD</code> runs. The pod becomes <code>Running</code>, and a Service (coming up) routes traffic to it. From now on, the Lesson 1 control loops keep it alive.",
+    artifact: "forecast-api-6f9c7d8b4d-k2x9p   1/1   Running",
+    ask: "\"Where do the logs go? What port does it listen on?\"" },
+]);
+</script>
+</body></html>

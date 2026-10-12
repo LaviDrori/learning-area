@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Desired State</title>
+<link rel="stylesheet" href="../assets/course.css">
+<style>
+  .arch text { font-family: var(--mono); font-size: 12px; fill: var(--fg); }
+  .arch .box { fill: var(--panel); stroke: var(--rule); }
+  .arch .hub { fill: var(--bg); stroke: var(--accent); stroke-width: 2; }
+  .arch .pod { fill: none; stroke: var(--good); }
+  .arch .lbl { font-family: var(--serif); font-style: italic; font-size: 13px; fill: var(--muted); }
+  .arch line { stroke: var(--accent); stroke-width: 1.4; marker-end: url(#arr); }
+</style>
+</head>
+<body><main>
+<div class="crumbs">Kubernetes · Lesson 1 · <a href="../reference/glossary.html">Glossary</a></div>
+
+<h1>Desired State &amp; the Control Loop</h1>
+<p class="subtitle">The one idea everything else in Kubernetes is built on. ~25 minutes.</p>
+
+<div class="goal"><strong>Your win today:</strong> explain, without notes, what happens when you tell Kubernetes <em>"run 3 copies of my app"</em>, and which component heals each kind of failure. It's also the mental model behind the classic interview question "what happens when you run kubectl apply?"</div>
+
+<h2>1. Start with a container</h2>
+<p>A <b>container</b> packages an application "along with its runtime dependencies." It runs from a <b>container image</b>, "a ready-to-run software package containing everything needed to run an application".<span class="note">Both quotes: <a href="https://kubernetes.io/docs/concepts/containers/">kubernetes.io, Containers</a>.</span> Think of the image as a sealed box: your Python service, the Python interpreter, the libraries. It runs the same on a laptop or a server.</p>
+<p>One container on one machine is easy. Now picture 200 services, each needing 3+ copies, spread over 50 machines. Machines die and containers crash at 3am. <em>Someone</em> has to keep all of that running. The overview docs put it this way: "Wouldn't it be easier if this behavior was handled by a system?"<span class="note">See <a href="https://kubernetes.io/docs/concepts/overview/">Overview: Why you need Kubernetes</a>.</span> That system is Kubernetes.</p>
+
+<h2>2. You declare, Kubernetes converges</h2>
+<p>You don't tell Kubernetes <em>"start a container on server 7."</em> You tell it <em>what you want to be true</em>, and it works continuously to make it true.</p>
+<blockquote>"When you set the temperature, that's telling the thermostat about your <i>desired state</i>. The actual room temperature is the <i>current state</i>. The thermostat acts to bring the current state closer to the desired state."<cite>— <a href="https://kubernetes.io/docs/concepts/architecture/controller/">kubernetes.io, Controllers</a></cite></blockquote>
+<p>In Kubernetes:</p>
+<ul>
+  <li><b>Desired state</b> lives in an object's <code>spec</code>, e.g. <code>replicas: 3</code>.</li>
+  <li><b>Current state</b> is what is really running, reported in <code>status</code>.</li>
+  <li>A <b>controller</b> is the thermostat: a loop that never ends. <em>Observe → compare → act → repeat.</em></li>
+</ul>
+<p>This is called <b>reconciliation</b>. It is why Kubernetes is self-healing. Nobody wrote a "recover from crash" script. The loop just notices that <em>have ≠ want</em> and closes the gap. The docs describe Kubernetes as "a set of independent, composable control processes that continuously drive the current state towards the provided desired state".<span class="note"><a href="https://kubernetes.io/docs/concepts/overview/">Overview</a>, "What Kubernetes is not".</span></p>
+
+<h2>3. Who does the work: the cluster's anatomy</h2>
+<p>A <b>cluster</b> has a <b>control plane</b> (the brain: decides) and <b>nodes</b> (the hands: run things).</p>
+<figure>
+<svg class="arch" viewBox="0 0 640 330" role="img" aria-label="Control plane with API server at the center connected to etcd, scheduler, controller manager, and to the kubelet on each of two nodes">
+  <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker></defs>
+  <text class="lbl" x="10" y="18">control plane</text>
+  <rect class="box" x="10" y="26" width="620" height="120" rx="6"/>
+  <rect class="hub" x="250" y="60" width="140" height="44" rx="5"/><text x="320" y="87" text-anchor="middle">kube-apiserver</text>
+  <rect class="box" x="30" y="44" width="150" height="34" rx="4"/><text x="105" y="66" text-anchor="middle">etcd</text>
+  <rect class="box" x="30" y="94" width="150" height="34" rx="4"/><text x="105" y="116" text-anchor="middle">scheduler</text>
+  <rect class="box" x="460" y="64" width="155" height="36" rx="4"/><text x="537" y="87" text-anchor="middle">controller-manager</text>
+  <line x1="248" y1="74" x2="182" y2="62"/><line x1="182" y1="111" x2="248" y2="92"/><line x1="458" y1="82" x2="392" y2="82"/>
+  <text class="lbl" x="10" y="186">nodes</text>
+  <rect class="box" x="10" y="194" width="300" height="126" rx="6"/><rect class="box" x="330" y="194" width="300" height="126" rx="6"/>
+  <text x="25" y="216">node-1</text><text x="345" y="216">node-2</text>
+  <rect class="hub" x="25" y="226" width="110" height="30" rx="4"/><text x="80" y="246" text-anchor="middle">kubelet</text>
+  <rect class="hub" x="345" y="226" width="110" height="30" rx="4"/><text x="400" y="246" text-anchor="middle">kubelet</text>
+  <text x="25" y="282" font-size="11">runtime · kube-proxy</text><text x="345" y="282" font-size="11">runtime · kube-proxy</text>
+  <rect class="pod" x="170" y="226" width="120" height="26" rx="3"/><text x="230" y="244" text-anchor="middle" font-size="11">pod</text>
+  <rect class="pod" x="170" y="260" width="120" height="26" rx="3"/><text x="230" y="278" text-anchor="middle" font-size="11">pod</text>
+  <rect class="pod" x="490" y="226" width="120" height="26" rx="3"/><text x="550" y="244" text-anchor="middle" font-size="11">pod</text>
+  <line x1="80" y1="224" x2="290" y2="106"/><line x1="400" y1="224" x2="345" y2="106"/>
+</svg>
+<figcaption>Everything talks to the API server. Components never talk to each other directly; they watch and update shared state through it.</figcaption>
+</figure>
+
+<table>
+<tr><th>Component</th><th>Role in the "3 copies" story</th></tr>
+<tr><td><code>kube-apiserver</code></td><td>Receives your request. The front door for <em>everyone</em>.</td></tr>
+<tr><td><code>etcd</code></td><td>Stores <code>replicas: 3</code>, the desired state, durably.</td></tr>
+<tr><td><code>controller-manager</code></td><td>Its ReplicaSet controller sees 0 pods but wants 3, so it creates 3 Pod objects.</td></tr>
+<tr><td><code>kube-scheduler</code></td><td>Sees pods with no node and assigns each one a node.</td></tr>
+<tr><td><code>kubelet</code></td><td>On each node, sees "a pod is assigned to me" and tells the container runtime to start it.</td></tr>
+</table>
+<p class="note">Each role adapted from <a href="https://kubernetes.io/docs/concepts/overview/components/">Kubernetes Components</a>.</p>
+<p>Notice: the controller doesn't start containers. As the docs put it, "the Job controller does not run any Pods or containers itself. Instead, the Job controller tells the API server to create or remove Pods." Every component does one small job and hands off through shared state.</p>
+
+<h3>And what's a Pod?</h3>
+<p>"<i>Pods</i> are the smallest deployable units of computing that you can create and manage in Kubernetes." A pod wraps one or more containers that share network and storage. Pods are "relatively ephemeral, disposable entities," so you almost never create one by hand. You create something with a controller behind it, so dead pods get replaced.<span class="note"><a href="https://kubernetes.io/docs/concepts/workloads/pods/">kubernetes.io, Pods</a>.</span></p>
+
+<hr>
+
+<h2>4. Practice: break the cluster</h2>
+<p>Below is a toy cluster running the same four actors. Each tick, every component takes <em>one</em> step, and the log names who acted. Complete the missions; they tick themselves off. Use <b>pause</b> and <b>step</b> to slow it down, and <b>predict before you click</b>: say out loud which component will act next.</p>
+<div id="sim"></div>
+<p class="note">Simplified on purpose. Real clusters wait minutes before evicting pods from a dead node, and a container that keeps crashing goes into <code>CrashLoopBackOff</code> with growing delays.</p>
+
+<h2>5. Retrieval: from memory, not from scrolling up</h2>
+<p>Scroll so the lesson above is out of sight. Write first, then compare. Effortful recall is what makes this stick.</p>
+
+<div class="recall">
+  <p class="q">Map the thermostat analogy onto Kubernetes. What is the "temperature setting", the "room temperature", and the "thermostat"?</p>
+  <div class="model">Setting = <b>desired state</b> (<code>spec</code>, e.g. <code>replicas: 3</code>, stored in etcd). Room temperature = <b>current state</b> (what's actually running, <code>status</code>). Thermostat = a <b>controller</b>, a never-ending loop that compares the two and acts (via the API server) to close the gap.</div>
+</div>
+<div class="recall">
+  <p class="q">You submit <code>replicas: 3</code> to an empty cluster. Name each component that acts, in order, and what it does.</p>
+  <div class="model">1. <b>kube-apiserver</b> accepts it and <b>etcd</b> stores it. 2. <b>ReplicaSet controller</b> (in controller-manager) sees 0 ≠ 3 and creates 3 Pod objects. 3. <b>kube-scheduler</b> assigns each unscheduled pod to a node. 4. <b>kubelet</b> on each node sees its pod and has the <b>container runtime</b> start the container.</div>
+</div>
+
+<h3>Quick check <span class="score"></span></h3>
+
+<div class="quiz" data-answer="0">
+  <p class="q">You scale your app from 3 to 5 replicas. What changes <em>first</em>?</p>
+  <button>The desired count stored in etcd</button>
+  <button>The containers running on each node</button>
+  <button>The kubelet's local list of pods</button>
+  <p class="why">You only ever change <b>desired state</b>. Everything else follows as the controllers, scheduler and kubelets each react to the gap.</p>
+</div>
+
+<div class="quiz" data-answer="1">
+  <p class="q">A container inside pod <code>web-x2k4p</code> crashes. Seconds later, what do you see?</p>
+  <button>New pod name, restart count is reset</button>
+  <button>Same pod name, restart count went up</button>
+  <button>Pod stays down until you redeploy it</button>
+  <p class="why">The <b>kubelet</b> restarts the container <em>in place</em>, inside the same pod. A new pod name means the pod itself was replaced, which happens when a pod is deleted or its node dies.</p>
+</div>
+
+<div class="quiz" data-answer="2">
+  <p class="q">Which component decides <em>which node</em> a new pod runs on?</p>
+  <button>kubelet</button>
+  <button>etcd</button>
+  <button>kube-scheduler</button>
+  <button>kube-apiserver</button>
+  <p class="why">The <b>scheduler</b> "looks for Pods not yet bound to a node, and assigns each Pod to a suitable node." The kubelet only runs what has already been assigned to it.</p>
+</div>
+
+<div class="quiz" data-answer="1">
+  <p class="q">Every node is powered off. You scale to 4 replicas. The new pods are…</p>
+  <button>Running, because the desired state is satisfied</button>
+  <button>Pending, because no node can accept them</button>
+  <button>Deleted, because the controller gives up waiting</button>
+  <p class="why">The controller still creates the pods (desired ≠ current), but the scheduler has nowhere to put them. <code>Pending</code> is one of the most common statuses you'll debug at work. It usually means "can't be scheduled".</p>
+</div>
+
+<div class="quiz" data-answer="2">
+  <p class="q">Why do you almost never create a bare Pod directly?</p>
+  <button>Pods can only ever hold one single container</button>
+  <button>The scheduler refuses to place bare pods ever</button>
+  <button>Nothing would replace it if it ever died</button>
+  <p class="why">No controller owns a bare pod, so no loop holds a desired count for it. If it's deleted or its node dies, it's simply gone. That's why you use workload resources such as Deployments, which is lesson 2.</p>
+</div>
+
+<hr>
+
+<div class="callout source"><b>Primary source, read this next (~15 min):</b> <a href="https://kubernetes.io/docs/concepts/architecture/controller/">Controllers</a> and <a href="https://kubernetes.io/docs/concepts/overview/components/">Kubernetes Components</a> on kubernetes.io. They are short, official, and you now have the vocabulary to read them easily. Keep the <a href="../reference/glossary.html">course glossary</a> open alongside.</div>
+
+<div class="callout ask"><b>Stuck or curious? Ask me.</b> I'm your teacher for this course. Bring anything that felt fuzzy, e.g. <em>"what happens if the API server itself dies?"</em> or <em>"is a ReplicaSet the same as a Deployment?"</em> Also tell me how the quiz went so I can pitch the next lesson right.</div>
+
+<div class="next"><span><a href="../reference/glossary.html">← Glossary</a></span><span><a href="0002-reading-a-deployment-manifest.html">Next: Reading a Deployment manifest →</a></span></div>
+</main>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/reconcile-sim.js"></script>
+<script>
+ReconcileSim.mount(document.getElementById("sim"), {
+  nodes: 3, replicas: 3,
+  missions: [
+    { text: "Scale up, then watch the scheduler place the new pod", on: "scaled-up" },
+    { text: "Delete a pod: which component replaces it?", on: "pod-replaced" },
+    { text: "Crash a container: does the pod name change?", on: "container-restarted" },
+    { text: "Power off a node and watch its pods move", on: "node-evicted" },
+    { text: "Power off every node, then scale up: what status do new pods get?", on: "stuck-pending" },
+  ],
+});
+</script>
+</body></html>

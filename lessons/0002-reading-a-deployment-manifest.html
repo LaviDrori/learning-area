@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reading a Deployment</title>
+<link rel="stylesheet" href="../assets/course.css">
+<style>
+  .name { font-family: var(--mono); font-size: .95rem; text-align: center; margin: 1.4rem 0 .4rem; word-break: break-all; }
+  .name span { padding: .1rem .2rem; border-bottom: 3px solid; }
+  .name .d { border-color: var(--accent); } .name .h { border-color: var(--warn); } .name .r { border-color: var(--good); }
+  .legend { font-size: .8rem; text-align: center; color: var(--muted); }
+  .legend b { font-weight: 600; }
+  .nest { font-family: var(--mono); font-size: .8rem; }
+  .nest div { border: 1px solid var(--rule); border-radius: 5px; padding: .5rem .7rem .6rem; margin-top: .4rem; }
+  .nest .t1 { border-color: var(--accent); } .nest .t2 { border-color: var(--warn); } .nest .t3 { border-color: var(--good); }
+  .nest span { color: var(--muted); font-family: var(--serif); font-style: italic; }
+</style>
+</head>
+<body><main>
+<div class="crumbs">Kubernetes · Lesson 2 · <a href="0001-desired-state-and-the-control-loop.html">Lesson 1</a> · <a href="../reference/glossary.html">Glossary</a> · <a href="../reference/deployment-manifest.html">Deployment cheat sheet</a></div>
+
+<h1>Reading a Deployment Manifest</h1>
+<p class="subtitle">From a YAML file to the pods you see in <code>kubectl get pods</code>. ~25 minutes.</p>
+
+<div class="goal"><strong>Your win today:</strong> look at a Deployment YAML and predict what <code>kubectl get deployments</code>, <code>kubectl get rs</code> and <code>kubectl get pods</code> will show, including what an edit will change. You can also decode any pod name you'll ever see.</div>
+
+<h2>0. Warm-up from Lesson 1</h2>
+<p>Spaced recall: answer before reading on. <span class="score"></span></p>
+
+<div class="quiz" data-answer="1">
+  <p class="q">Someone deletes one of your pods. Which component creates its replacement?</p>
+  <button>kubelet</button>
+  <button>ReplicaSet controller</button>
+  <button>kube-scheduler</button>
+  <p class="why">The <b>ReplicaSet controller</b> sees <em>have 2, want 3</em> and creates a new Pod object. The kubelet only restarts <em>containers</em> inside pods it already has. Keep the ReplicaSet in mind: it's a big part of today.</p>
+</div>
+
+<div class="quiz" data-answer="0">
+  <p class="q">A node dies. Which component picks the <em>new</em> node for the replacement pods?</p>
+  <button>kube-scheduler</button>
+  <button>controller-manager</button>
+  <button>kubelet</button>
+  <p class="why">Controllers create the replacement pods with no node assigned. The <b>scheduler</b> then binds each one to a healthy node.</p>
+</div>
+
+<h2>1. A manifest is desired state, written down</h2>
+<p>In Lesson 1 you changed desired state by clicking buttons. In real life you write it in a YAML file called a <b>manifest</b> and send it to the API server with <code>kubectl apply -f deployment.yaml</code>. Every manifest has the same four top-level fields<span class="note"><a href="https://kubernetes.io/docs/concepts/overview/working-with-objects/">kubernetes.io, Objects in Kubernetes</a>, "Required fields".</span>:</p>
+<table>
+<tr><th>Field</th><th>Official meaning</th></tr>
+<tr><td><code>apiVersion</code></td><td>"Which version of the Kubernetes API you're using to create this object"</td></tr>
+<tr><td><code>kind</code></td><td>"What kind of object you want to create"</td></tr>
+<tr><td><code>metadata</code></td><td>"Data that helps uniquely identify the object, including a <code>name</code> string…"</td></tr>
+<tr><td><code>spec</code></td><td>"What state you desire for the object"</td></tr>
+</table>
+<p>You never write <code>status</code>. It is "supplied and updated by the Kubernetes system and its components." That's the thermostat's reading of the room.</p>
+
+<h2>2. Explore a real Deployment</h2>
+<p>This is the example from the official Deployment docs<span class="note">Verbatim from <a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#creating-a-deployment">Deployments, "Creating a Deployment"</a>.</span>. Click every ● line. The key to reading it is that it has <em>three nested layers</em>:</p>
+<div class="nest">
+  <div class="t1">Deployment <span>— how many, and which pods are mine</span>
+    <div class="t2">template = a Pod blueprint <span>— what every pod looks like</span>
+      <div class="t3">containers <span>— the image(s) each pod runs</span></div>
+    </div>
+  </div>
+</div>
+<div id="yaml"></div>
+
+<h2>3. One manifest, three kinds of objects</h2>
+<p>You applied <em>one</em> object, but three kinds show up. "The Deployment creates a ReplicaSet that creates three replicated Pods." Each layer is owned by a controller, the same loop idea as Lesson 1:</p>
+<ul>
+  <li>The <b>Deployment controller</b> keeps a <b>ReplicaSet</b> matching your template.</li>
+  <li>The <b>ReplicaSet controller</b> keeps <em>N</em> <b>Pods</b> alive. This is the one that replaced your deleted pod in Lesson 1.</li>
+</ul>
+<p>You can read the whole chain from a pod's name alone. "The name of the ReplicaSet is always formatted as <code>[DEPLOYMENT-NAME]-[HASH]</code>. This name will become the basis for the Pods."</p>
+<p class="name"><span class="d">nginx-deployment</span>-<span class="h">75675f5897</span>-<span class="r">7ci7o</span></p>
+<p class="legend"><b style="color:var(--accent)">Deployment name</b> · <b style="color:var(--warn)">pod-template-hash</b> (with the Deployment name, this is the ReplicaSet's name) · <b style="color:var(--good)">random pod suffix</b></p>
+<p>The hash isn't random: it comes from "hashing the <code>PodTemplate</code>." Same template, same hash. A changed template gives a new hash, and with it a new ReplicaSet<span class="note"><a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#pod-template-hash-label">Deployments, "Pod-template-hash label"</a>. Its caution: "Do not change this label."</span>.</p>
+<div class="callout"><b>In practice:</b> in <code>kubectl get pods</code>, pods with the same middle segment belong to the same ReplicaSet, which means the same version of the template. If two different hashes show up for one app, a rollout is in progress or stuck.</div>
+
+<h2>4. Labels and selectors: the glue</h2>
+<p>How does a ReplicaSet know which pods are "its" pods? Not by name, but by <b>labels</b>, which are "key/value pairs that are attached to objects such as Pods." A <b>label selector</b> picks out every object carrying those labels. The docs call it "the core grouping primitive in Kubernetes"<span class="note"><a href="https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/">kubernetes.io, Labels and Selectors</a>.</span>.</p>
+<p>So in the manifest, <code>spec.selector</code> says <em>"my pods are the ones labelled <code>app: nginx</code>"</em>, and <code>spec.template.metadata.labels</code> stamps <code>app: nginx</code> on every pod it creates. Two hard rules follow<span class="note"><a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#selector">Deployments, "Selector"</a>.</span>:</p>
+<ul>
+  <li>"<code>.spec.selector</code> must match <code>.spec.template.metadata.labels</code>, or it will be rejected by the API."</li>
+  <li>The selector "is immutable after creation." To change it, "you have to delete the Deployment and recreate it."</li>
+</ul>
+<p>Hold on to this idea. In Lesson 3 you'll see that <b>Services</b> find pods for network traffic in exactly the same way, with a label selector.</p>
+
+<h2>5. Which edits do what</h2>
+<blockquote>"A Deployment's rollout is triggered if and only if the Deployment's Pod template (that is, <code>.spec.template</code>) is changed, for example if the labels or container images of the template are updated. Other updates, such as scaling the Deployment, do not trigger a rollout."<cite>— <a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#updating-a-deployment">Deployments, "Updating a Deployment"</a></cite></blockquote>
+<table>
+<tr><th>You change…</th><th>Template changed?</th><th>What you'll see</th></tr>
+<tr><td><code>replicas</code></td><td>No</td><td>Same ReplicaSet, its DESIRED count changes. Existing pods keep their names.</td></tr>
+<tr><td><code>image</code> (or anything under <code>template</code>)</td><td>Yes</td><td>A <b>new</b> ReplicaSet with a new hash scales up while the old one scales to 0. All pods get new names.</td></tr>
+</table>
+<p>From the docs, after changing the image, the old ReplicaSet stays around with 0 pods:</p>
+<pre>NAME                          DESIRED   CURRENT   READY   AGE
+nginx-deployment-1564180365   3         3         3       6s
+nginx-deployment-2035384211   0         0         0       36s</pre>
+
+<hr>
+
+<h2>6. Practice: apply and read the output</h2>
+<p>Below is a simplified cluster. Change the fields, hit <b>kubectl apply</b>, and read the three outputs the way you would at work. Newly created pods are shown in green. <b>Predict first</b>: before each apply, say out loud whether a new ReplicaSet will appear.</p>
+<div id="ds"></div>
+<p class="note">Simplified: real rollouts replace pods gradually (by default at most 25% unavailable / 25% surge), and pods pass through <code>ContainerCreating</code> first. Rolling updates get their own lesson.</p>
+
+<h2>7. Predict the cluster <span class="score"></span></h2>
+
+<div class="quiz" data-answer="1">
+  <p class="q">You see pod <code>checkout-5d8f7b9c6d-q2x7m</code>. What's the name of the ReplicaSet that owns it?</p>
+  <button>checkout</button>
+  <button>checkout-5d8f7b9c6d</button>
+  <button>5d8f7b9c6d-q2x7m</button>
+  <button>q2x7m</button>
+  <p class="why">ReplicaSet = <code>[DEPLOYMENT-NAME]-[HASH]</code>. The last segment is the random per-pod suffix.</p>
+</div>
+
+<div class="quiz" data-answer="1">
+  <p class="q">You change <code>replicas: 3</code> to <code>replicas: 6</code> and apply. What does <code>kubectl get rs</code> show?</p>
+  <button>Two ReplicaSets, the old one scaled to zero</button>
+  <button>One ReplicaSet, which now desires six pods</button>
+  <button>No ReplicaSets, the Deployment makes pods directly</button>
+  <p class="why">Scaling doesn't touch the template, so the hash stays the same and so does the ReplicaSet. Only its DESIRED count changes. Your 3 existing pods keep their names; 3 new ones join.</p>
+</div>
+
+<div class="quiz" data-answer="2">
+  <p class="q">You change the image from <code>nginx:1.14.2</code> to <code>nginx:1.16.1</code>. What happens to the pod names?</p>
+  <button>Same names, containers restart with new image</button>
+  <button>New names, hash segment stays exactly identical</button>
+  <button>New names carrying a different hash segment</button>
+  <p class="why">The image is inside the template, so the template changes. That gives a new hash, a new ReplicaSet and brand-new pods. Pods aren't updated in place; they're replaced.</p>
+</div>
+
+<div class="quiz" data-answer="0">
+  <p class="q">A teammate's Deployment has <code>selector.matchLabels: {app: web}</code> but the template has <code>labels: {app: api}</code>. On <code>kubectl apply</code>…</p>
+  <button>The API server rejects the Deployment outright</button>
+  <button>Pods get created but are never counted</button>
+  <button>The selector silently adopts the template labels</button>
+  <p class="why">The docs are explicit: the selector "must match <code>.spec.template.metadata.labels</code>, or it will be rejected by the API." Kubernetes catches this mistake before anything runs.</p>
+</div>
+
+<div class="quiz" data-answer="2">
+  <p class="q">You need to change a live Deployment's selector from <code>app: web</code> to <code>app: shop</code>. What must you do?</p>
+  <button>Edit the selector and run kubectl apply</button>
+  <button>Change only the pod template labels first</button>
+  <button>Delete the Deployment and create it again</button>
+  <p class="why">The selector is immutable after creation. Deleting the Deployment also deletes its pods by default, which means downtime. That's why the docs say to "plan your selectors up front."</p>
+</div>
+
+<div class="quiz" data-answer="0">
+  <p class="q">After rolling the image back to <code>nginx:1.14.2</code>, the original ReplicaSet (same old hash) scales back up. Why the <em>same</em> hash?</p>
+  <button>The hash is computed from the pod template</button>
+  <button>Kubernetes always reuses the oldest hash it remembers</button>
+  <button>Rollbacks restore a saved snapshot of the pods</button>
+  <p class="why">Same template in, same hash out. So the Deployment finds its old ReplicaSet (kept at 0 pods) and scales it up again. That's why old ReplicaSets are kept around: they make rollbacks cheap. Try it in the simulator if you haven't.</p>
+</div>
+
+<hr>
+
+<div class="callout source"><b>Primary source, read this next (~15 min):</b> the <a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#creating-a-deployment">"Creating a Deployment"</a> and <a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#updating-a-deployment">"Updating a Deployment"</a> sections of the official Deployments page. Stop before "Rolling Back". It's the same nginx example, so everything should look familiar now. The compressed version is on the <a href="../reference/deployment-manifest.html">Deployment cheat sheet</a>.</div>
+
+<div class="callout ask"><b>Questions? Ask me.</b> For example: <em>"What does the full object look like, status included?"</em> (that's <code>kubectl get deployment &lt;name&gt; -o yaml</code>), or <em>"what's the difference between a Deployment and a StatefulSet?"</em> Tell me how the quiz went, too.</div>
+
+<div class="next"><span><a href="0001-desired-state-and-the-control-loop.html">← Lesson 1: Desired state</a></span><span>Next: Services: how traffic finds your pods →</span></div>
+</main>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/yaml-explain.js"></script>
+<script src="../assets/deploy-sim.js"></script>
+<script>
+YamlExplain.mount(document.getElementById("yaml"), `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+  labels:
+    app: nginx
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.14.2
+        ports:
+        - containerPort: 80
+`, {
+  1: "<b>apiVersion</b>: which API version this object belongs to. Deployments live in the <code>apps</code> group, version <code>v1</code>.",
+  2: "<b>kind</b>: what kind of object this is. This one field decides which controller cares about it, here the Deployment controller.",
+  4: "<b>metadata.name</b>: \"This name will become the basis for the ReplicaSets and Pods which are created later.\" Remember it: every pod name will start with <code>nginx-deployment-</code>.",
+  5: "<b>Labels on the Deployment itself.</b> Useful for finding/organizing Deployments, but <em>not</em> what the selector matches. Those are the pod labels further down. Easy to confuse.",
+  7: "<b>spec</b> of the Deployment, its <em>desired state</em>. Everything below is what you want; <code>status</code> (not written by you) will report what is.",
+  8: "<b>replicas: 3</b>: \"The Deployment creates a ReplicaSet that creates three replicated Pods.\" Changing this number is <em>scaling</em>, which does <em>not</em> trigger a rollout.",
+  9: "<b>selector</b>: how the Deployment's ReplicaSet decides which pods are its own. It matches on labels, not names. Required, and <b>immutable</b> after creation.",
+  11: "<b>matchLabels: app: nginx</b>: \"my pods are those labelled app=nginx\". Must match the template labels below, \"or it will be rejected by the API.\"",
+  12: "<b>template</b>: the Pod blueprint. Everything indented under here is a <em>Pod's</em> metadata and spec. Change anything here and you get a new pod-template-hash, which means a rollout.",
+  15: "<b>Pod labels</b>: stamped onto every pod created from this template. This is what the selector (line 11) finds. Kubernetes also adds <code>pod-template-hash</code> automatically.",
+  16: "<b>The Pod's spec</b>: a spec inside a spec. Line 7 described the Deployment; this one describes each Pod.",
+  17: "<b>containers</b>: a list. A pod can hold more than one container (they'd share network and storage), but one per pod is the common case.",
+  18: "<b>name: nginx</b>: the container's name inside the pod. It's what you'd pass to <code>kubectl logs &lt;pod&gt; -c nginx</code> when a pod has several containers.",
+  19: "<b>image: nginx:1.14.2</b>: the container image, in <code>repository:tag</code> form, here from Docker Hub. Bumping this tag is the most common change in real-world deploys.",
+  21: "<b>containerPort: 80</b>: the port the app inside listens on. It mostly documents intent; actually routing traffic to it is the job of a <b>Service</b>, which is Lesson 3.",
+});
+
+DeploySim.mount(document.getElementById("ds"), {
+  name: "nginx-deployment", replicas: 3, images: ["nginx:1.14.2", "nginx:1.16.1"],
+  missions: [
+    { text: "Scale to 5: does a new ReplicaSet appear? Do existing pod names change?", on: "scaled" },
+    { text: "Change the image to nginx:1.16.1: compare the hashes before and after", on: "rollout" },
+    { text: "Roll back to nginx:1.14.2: which ReplicaSet comes back?", on: "rollback" },
+  ],
+});
+</script>
+</body></html>
