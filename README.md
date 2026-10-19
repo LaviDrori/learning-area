@@ -8,7 +8,7 @@ All content here is AI-generated and maintained via the `/mattpocock-skills:teac
 
 | Topic | Why I'm learning it | Lessons | Start here |
 |-------|---------------------|---------|------------|
-| [Kubernetes](kubernetes/) | Answer customers' DevOps questions about running my app containers ([mission](kubernetes/MISSION.md)) | 4 | [Lesson 1](kubernetes/lessons/0001-desired-state-and-the-control-loop.html) |
+| [Kubernetes](kubernetes/) | Answer customers' DevOps questions about running my app containers ([mission](kubernetes/MISSION.md)) | 5 | [Lesson 1](kubernetes/lessons/0001-desired-state-and-the-control-loop.html) |
 | [Jenkins](jenkins/) | Follow and contribute to DevOps conversations about our CI/CD ([mission](jenkins/MISSION.md)) | 1 | [Lesson 1](jenkins/lessons/0001-from-pull-request-to-green-check.html) |
 
 ## Structure

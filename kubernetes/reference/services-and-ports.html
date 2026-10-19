@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Services Cheat Sheet</title>
+<link rel="stylesheet" href="../assets/course.css">
+<style> pre .c { color: var(--muted); } </style>
+</head>
+<body><main>
+<div class="crumbs">Lessons: <a href="../lessons/0001-desired-state-and-the-control-loop.html">1</a> · <a href="../lessons/0002-reading-a-deployment-manifest.html">2</a> · <a href="../lessons/0003-from-git-push-to-running-pod.html">3</a> · <a href="../lessons/0004-a-kubernetes-friendly-dockerfile.html">4</a> · <a href="../lessons/0005-services-and-ports.html">5</a> · Reference: <a href="glossary.html">Glossary</a> · <a href="deployment-manifest.html">Deployment</a> · <a href="git-to-pod.html">Git-to-pod</a> · <a href="dockerfile-for-k8s.html">Dockerfile</a></div>
+<h1>Services and Ports</h1>
+<p class="subtitle">How traffic reaches your container. Sources: <a href="https://kubernetes.io/docs/concepts/services-networking/service/">Service</a> · <a href="https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/">DNS</a> · <a href="https://kubernetes.io/docs/concepts/services-networking/ingress/">Ingress</a> · <a href="https://kubernetes.io/docs/tasks/debug/debug-application/debug-service/">Debug Services</a>.</p>
+
+<h2>Template</h2>
+<pre>apiVersion: v1                 <span class="c"># core API group: plain v1</span>
+kind: Service
+metadata:
+  name: forecast-api           <span class="c"># also the DNS name: http://forecast-api</span>
+spec:
+  type: ClusterIP              <span class="c"># default: in-cluster only; Ingress/Gateway in front</span>
+  selector:
+    app: forecast-api          <span class="c"># must equal the pod template labels (no matchLabels here)</span>
+  ports:
+  - name: http                 <span class="c"># required once there are 2+ ports</span>
+    protocol: TCP              <span class="c"># default; HTTP runs over TCP</span>
+    port: 80                   <span class="c"># what clients dial (customer's choice)</span>
+    targetPort: 8000           <span class="c"># where your app REALLY listens; defaults to port if omitted</span></pre>
+
+<h2>The port chain</h2>
+<table>
+<tr><th>Number</th><th>Lives in</th><th>Means</th><th>Must match</th></tr>
+<tr><td><code>port</code></td><td>Service</td><td>what clients dial</td><td>nothing; free choice</td></tr>
+<tr><td><code>targetPort</code></td><td>Service</td><td>where traffic is sent on each pod</td><td><b>your app's listen port</b></td></tr>
+<tr><td><code>containerPort</code></td><td>Deployment</td><td>documentation; lets you <em>name</em> a port</td><td>your app's port, for honesty</td></tr>
+<tr><td><code>nodePort</code></td><td>Service (NodePort/LB)</td><td>port on every node's IP</td><td>range 30000-32767 by default</td></tr>
+<tr><td><code>--host 0.0.0.0 --port 8000</code></td><td>your <code>CMD</code></td><td>the truth</td><td>host must be <code>0.0.0.0</code>, not <code>127.0.0.1</code></td></tr>
+<tr><td><code>EXPOSE 8000</code></td><td>Dockerfile</td><td>documentation only</td><td>your app's port, for honesty</td></tr>
+</table>
+
+<h2>Service types</h2>
+<table>
+<tr><th>Type</th><th>Reachable from</th></tr>
+<tr><td><b>ClusterIP</b> (default)</td><td>inside the cluster only</td></tr>
+<tr><td><b>NodePort</b></td><td>every node's IP at a port from 30000-32767; includes a ClusterIP</td></tr>
+<tr><td><b>LoadBalancer</b></td><td>an external load balancer, usually from the cloud provider</td></tr>
+<tr><td><b>Ingress / Gateway</b></td><td>not a type: HTTP(S) routing by host and path to ClusterIP Services, TLS termination. Ingress is frozen; Gateway is recommended</td></tr>
+</table>
+
+<h2>Cluster DNS names</h2>
+<pre>forecast-api                                <span class="c"># from the same namespace</span>
+forecast-api.prod                           <span class="c"># from another namespace: service.namespace</span>
+forecast-api.prod.svc.cluster.local         <span class="c"># fully qualified (cluster.local is the usual domain)</span></pre>
+
+<h2>Your answer to "what port, how do we expose it?"</h2>
+<blockquote>"HTTP on port 8000, bound to 0.0.0.0. Point a ClusterIP Service's targetPort at 8000 and route to it from your Ingress or Gateway. TLS terminates there."</blockquote>
+
+<h2>Symptom → cause</h2>
+<table>
+<tr><th>Symptom</th><th>Likely cause</th></tr>
+<tr><td>EndpointSlice <code>ENDPOINTS &lt;none&gt;</code>, Ingress 503</td><td>Service selector doesn't match pod labels (typo, relabel)</td></tr>
+<tr><td>Endpoints listed, Service calls refused</td><td><code>targetPort</code> wrong, or omitted so it defaulted to <code>port</code></td></tr>
+<tr><td>Inside pod <code>localhost</code> works, pod IP refused</td><td>App bound to <code>127.0.0.1</code> (uvicorn/Flask default): add <code>--host 0.0.0.0</code></td></tr>
+<tr><td><code>provided port is not in the valid range…30000-32767</code></td><td><code>nodePort</code> outside the range: omit it to auto-assign</td></tr>
+<tr><td>Named <code>targetPort: http</code> gets nothing</td><td>No <code>containerPort</code> named <code>http</code> in the pod</td></tr>
+<tr><td>Short name doesn't resolve across namespaces</td><td>Use <code>service.namespace</code></td></tr>
+</table>
+
+<h2>Debug commands</h2>
+<pre>kubectl get service forecast-api -o yaml                              <span class="c"># check selector, port, targetPort</span>
+kubectl get endpointslices -l kubernetes.io/service-name=forecast-api <span class="c"># which pod IPs are behind it</span>
+kubectl get pods -l app=forecast-api --show-labels                    <span class="c"># run the selector yourself; see real labels</span>
+kubectl port-forward service/forecast-api 5000:80                     <span class="c"># laptop:5000 → Service port 80 → targetPort</span></pre>
+</main></body></html>
