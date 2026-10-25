@@ -6,7 +6,7 @@
 <link rel="stylesheet" href="../assets/course.css">
 </head>
 <body><main>
-<div class="crumbs">Lessons: <a href="../lessons/0001-desired-state-and-the-control-loop.html">1</a> · <a href="../lessons/0002-reading-a-deployment-manifest.html">2</a> · <a href="../lessons/0003-from-git-push-to-running-pod.html">3</a> · <a href="../lessons/0004-a-kubernetes-friendly-dockerfile.html">4</a> · Reference: <a href="deployment-manifest.html">Deployment</a> · <a href="git-to-pod.html">Git-to-pod</a> · <a href="dockerfile-for-k8s.html">Dockerfile</a></div>
+<div class="crumbs">Lessons: <a href="../lessons/0001-desired-state-and-the-control-loop.html">1</a> · <a href="../lessons/0002-reading-a-deployment-manifest.html">2</a> · <a href="../lessons/0003-from-git-push-to-running-pod.html">3</a> · <a href="../lessons/0004-a-kubernetes-friendly-dockerfile.html">4</a> · <a href="../lessons/0005-services-and-ports.html">5</a> · Reference: <a href="deployment-manifest.html">Deployment</a> · <a href="git-to-pod.html">Git-to-pod</a> · <a href="dockerfile-for-k8s.html">Dockerfile</a> · <a href="services-and-ports.html">Services</a></div>
 <h1>Glossary</h1>
 <p class="subtitle">The course's single source of truth for terms. Lessons use these words exactly as defined here. Definitions are quoted or adapted from <a href="https://kubernetes.io/docs/reference/glossary/">kubernetes.io</a>.</p>
 
@@ -61,6 +61,22 @@
 <tr><td><b>runAsNonRoot</b></td><td>securityContext field. If true, the kubelet refuses to start a container that would run as UID 0, or whose image user is a non-numeric name it can't verify.</td><td><a href="https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-v1/">docs</a> · L4</td></tr>
 <tr><td><b>Pod Security Standards</b></td><td>Three built-in policy levels: Privileged, Baseline, Restricted. Restricted ("current Pod hardening best practices") requires non-root.</td><td><a href="https://kubernetes.io/docs/concepts/security/pod-security-standards/">docs</a> · L4</td></tr>
 <tr><td><b>.dockerignore</b></td><td>File listing paths <code>COPY</code> must skip (<code>.git</code>, <code>.venv</code>, <code>.env</code>…).</td><td><a href="https://docs.docker.com/build/concepts/context/#dockerignore-files">docs</a> · L4</td></tr>
+</table>
+
+<h2>Networking</h2>
+<table>
+<tr><th>Term</th><th>Meaning</th><th>From</th></tr>
+<tr><td><b>Service</b></td><td>"An abstraction to help you expose groups of Pods over a network": a stable name, a stable virtual IP and a label selector in front of ever-changing pods.</td><td><a href="https://kubernetes.io/docs/concepts/services-networking/service/">docs</a> · L5</td></tr>
+<tr><td><b>Cluster IP</b></td><td>The virtual IP a Service gets at creation and keeps. Only routable inside the cluster.</td><td><a href="https://kubernetes.io/docs/concepts/services-networking/service/#type-clusterip">docs</a> · L5</td></tr>
+<tr><td><b>EndpointSlice</b></td><td>The live list of pod IP:port pairs behind a Service, kept up to date by a controller. <code>ENDPOINTS &lt;none&gt;</code> = the selector matches no pods.</td><td><a href="https://kubernetes.io/docs/concepts/services-networking/endpoint-slices/">docs</a> · L5</td></tr>
+<tr><td><b>port / targetPort</b></td><td><code>port</code> = what clients dial on the Service. <code>targetPort</code> = where the Service sends traffic on each pod; defaults to <code>port</code>. targetPort must equal the app's real listen port.</td><td><a href="https://kubernetes.io/docs/concepts/services-networking/service/#defining-a-service">docs</a> · L5</td></tr>
+<tr><td><b>containerPort</b></td><td>Pod-spec documentation of a port the container listens on. Omitting it doesn't block the port. Can carry a <code>name</code> for a named <code>targetPort</code>.</td><td><a href="https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-v1/#ports">docs</a> · L2, L5</td></tr>
+<tr><td><b>Service type</b></td><td><code>ClusterIP</code> (default, in-cluster only), <code>NodePort</code> (every node's IP, port 30000-32767), <code>LoadBalancer</code> (external load balancer), <code>ExternalName</code> (DNS alias).</td><td><a href="https://kubernetes.io/docs/concepts/services-networking/service/#publishing-services-service-types">docs</a> · L5</td></tr>
+<tr><td><b>Ingress</b></td><td>Object that routes HTTP(S) from outside by hostname/path to Services and can terminate TLS. Needs an Ingress controller. API frozen.</td><td><a href="https://kubernetes.io/docs/concepts/services-networking/ingress/">docs</a> · L5</td></tr>
+<tr><td><b>Gateway API</b></td><td>The recommended successor to Ingress. A <code>Gateway</code> is the entry point; an <code>HTTPRoute</code> maps hostnames/paths to Services.</td><td><a href="https://gateway-api.sigs.k8s.io/">docs</a> · L5</td></tr>
+<tr><td><b>Service DNS name</b></td><td><code>svc</code> from the same namespace, <code>svc.namespace</code> from another, <code>svc.namespace.svc.cluster.local</code> fully qualified.</td><td><a href="https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/">docs</a> · L5</td></tr>
+<tr><td><b>0.0.0.0 vs 127.0.0.1</b></td><td>Listen address. <code>0.0.0.0</code> = all interfaces, reachable from other pods. <code>127.0.0.1</code> = localhost, reachable only inside the same pod.</td><td><a href="https://www.uvicorn.org/settings/">uvicorn</a> · L5</td></tr>
+<tr><td><b>kubectl port-forward</b></td><td>Tunnel from a laptop port into a pod or Service: <code>service/web 5000:8080</code> = local 5000 → Service port 8080.</td><td><a href="https://kubernetes.io/docs/tasks/access-application-cluster/port-forward-access-application-cluster/">docs</a> · L5</td></tr>
 </table>
 
 <h2>Control plane, the brain</h2>

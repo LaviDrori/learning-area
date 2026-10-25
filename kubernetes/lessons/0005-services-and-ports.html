@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Services and Ports</title>
+<link rel="stylesheet" href="../assets/course.css">
+<style>
+  .chain svg text { font-family: var(--mono); font-size: 11.5px; fill: var(--fg); }
+  .chain svg .role { font-family: var(--serif); font-weight: 600; font-size: 13px; }
+  .chain svg .who { font-family: var(--serif); font-style: italic; font-size: 11.5px; fill: var(--muted); }
+  .chain svg rect { fill: var(--panel); stroke: var(--rule); stroke-width: 1.5; }
+  .chain svg rect.app { stroke: var(--accent); }
+  .chain svg .arrow { stroke: var(--muted); stroke-width: 1.6; }
+  .chain svg .head { fill: var(--muted); }
+  details { margin: .8rem 0; }
+  summary { cursor: pointer; font-weight: 600; }
+  .story { border-left: 3px solid var(--rule); padding-left: 1rem; margin: 1rem 0; }
+</style>
+</head>
+<body><main>
+<div class="crumbs">Kubernetes · Lesson 5 · <a href="0004-a-kubernetes-friendly-dockerfile.html">Lesson 4</a> · <a href="../reference/glossary.html">Glossary</a> · <a href="../reference/services-and-ports.html">Services cheat sheet</a></div>
+
+<h1>Services and Ports</h1>
+<p class="subtitle">How a request finds your container, and the one number that has to be right. ~25 minutes.</p>
+
+<div class="goal"><strong>Your win today:</strong> answer the customer question <em>"What port does it listen on, and how do we expose it?"</em> in one sentence, then find the four port and label mistakes in a manifest a customer sends back.</div>
+
+<h2>0. Warm-up <span class="score"></span></h2>
+<div class="quiz" data-answer="0">
+  <p class="q">A node dies. The ReplicaSet replaces your <code>forecast-api</code> pod on another node. The new pod has…</p>
+  <button>a new name and a new IP</button>
+  <button>the same name but a new IP</button>
+  <button>a new name but the same IP</button>
+  <p class="why">It's a brand-new pod, so it gets a new random name suffix (Lesson 1's three healers) and, like every pod, its own new IP. Anyone who saved the old pod's IP is now calling nothing. That's today's problem.</p>
+</div>
+<div class="quiz" data-answer="1">
+  <p class="q">You change only <code>replicas: 2</code> to <code>3</code> in the Deployment and apply. What happens?</p>
+  <button>A new ReplicaSet replaces both old pods</button>
+  <button>One extra pod joins the existing ReplicaSet</button>
+  <button>Nothing until someone restarts the old pods</button>
+  <p class="why"><code>replicas</code> sits outside the pod template, so the template hash doesn't change and there's no rollout (Lesson 2). The existing ReplicaSet just scales to 3.</p>
+</div>
+<div class="recall">
+  <p class="q">Optional, from memory: Lesson 4's four Dockerfile habits, and the customer question each one answers.</p>
+  <div class="model">① Log to stdout, with <code>ENV PYTHONUNBUFFERED=1</code>: "Where are your logs?" ② Exec-form <code>CMD ["…"]</code>, so the app is PID 1 and gets SIGTERM: "Do you shut down gracefully?" ③ Numeric non-root <code>USER 10001</code>: "Do you run as root?" ④ No secrets in <code>ENV</code>/<code>ARG</code>/<code>COPY</code>, plus a <code>.dockerignore</code>: "Are there secrets in the image?" Bonus ⓪: a pinned <code>FROM</code> tag for reproducible builds. Full version: <a href="../reference/dockerfile-for-k8s.html">Dockerfile cheat sheet</a>.</div>
+</div>
+
+<h2>1. Pod IPs don't last</h2>
+<p>"Each Pod gets its own IP address", but "Pods are ephemeral resources (you should not expect that an individual Pod is reliable and durable)"<span class="note"><a href="https://kubernetes.io/docs/concepts/services-networking/service/">kubernetes.io, Service</a>.</span>. Every rollout, crash replacement and scale-down swaps pods, and with them their IPs. So if the customer's frontend, or their Ingress, needs to call <code>forecast-api</code>, which IP does it use?</p>
+<p>None of them. It calls a <b>Service</b>: "an abstraction to help you expose groups of Pods over a network". A Service is an object, like a Deployment, and it gives you three stable things:</p>
+<table>
+<tr><th>Stable thing</th><th>Example</th><th>How</th></tr>
+<tr><td>a <b>name</b> in cluster DNS</td><td><code>forecast-api</code></td><td>Services get DNS records of the form <code>my-svc.my-namespace.svc.cluster-domain.example</code><span class="note"><a href="https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/">kubernetes.io, DNS for Services and Pods</a>.</span></td></tr>
+<tr><td>a virtual <b>IP</b>, the <em>cluster IP</em></td><td><code>10.96.40.12</code></td><td>assigned once when the Service is created, and kept</td></tr>
+<tr><td>a <b>selector</b></td><td><code>app: forecast-api</code></td><td>"The controller for that Service continuously scans for Pods that match its selector, and then makes any necessary updates to the set of EndpointSlices"</td></tr>
+</table>
+<p>An <b>EndpointSlice</b> is the live list of pod IP:port pairs behind a Service. You already predicted (correctly) that a selector matching no pods isn't rejected; the Service simply has an empty list. Now you know where to see that list: <code>kubectl get endpointslices -l kubernetes.io/service-name=forecast-api</code>. "If the <code>ENDPOINTS</code> column is <code>&lt;none&gt;</code>, you should check that the <code>spec.selector</code> field of your Service actually selects for <code>metadata.labels</code> values on your Pods"<span class="note"><a href="https://kubernetes.io/docs/tasks/debug/debug-application/debug-service/">kubernetes.io, Debug Services</a>.</span>.</p>
+
+<h2>2. One request, four numbers</h2>
+<p>Here's where customers' port questions come from. A request to your app passes through a chain, and each hop has its own number:</p>
+<figure class="chain">
+<svg viewBox="0 0 680 190" role="img" aria-label="Request chain. A client calls forecast-api on port 80. The Service listens on port 80 and forwards to targetPort 8000 on a pod IP. Inside the pod, uvicorn must listen on 0.0.0.0 port 8000.">
+  <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="head" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+  <rect x="5" y="20" width="145" height="62" rx="6"/>
+  <text class="role" x="77" y="45" text-anchor="middle">client</text>
+  <text x="77" y="66" text-anchor="middle">forecast-api:80</text>
+  <rect x="180" y="20" width="145" height="62" rx="6"/>
+  <text class="role" x="252" y="45" text-anchor="middle">Service</text>
+  <text x="252" y="66" text-anchor="middle">port: 80</text>
+  <rect x="355" y="20" width="145" height="62" rx="6"/>
+  <text class="role" x="427" y="45" text-anchor="middle">pod IP</text>
+  <text x="427" y="66" text-anchor="middle">10.244.1.7:8000</text>
+  <rect class="app" x="530" y="20" width="145" height="62" rx="6"/>
+  <text class="role" x="602" y="45" text-anchor="middle">your process</text>
+  <text x="602" y="66" text-anchor="middle">0.0.0.0:8000</text>
+  <line class="arrow" x1="150" y1="51" x2="178" y2="51" marker-end="url(#ah)"/>
+  <line class="arrow" x1="325" y1="51" x2="353" y2="51" marker-end="url(#ah)"/>
+  <line class="arrow" x1="500" y1="51" x2="528" y2="51" marker-end="url(#ah)"/>
+  <text class="who" x="77" y="110" text-anchor="middle">dials the Service</text>
+  <text class="who" x="77" y="126" text-anchor="middle">name and port</text>
+  <text class="who" x="252" y="110" text-anchor="middle">port = what clients</text>
+  <text class="who" x="252" y="126" text-anchor="middle">dial (customer's choice)</text>
+  <text class="who" x="427" y="110" text-anchor="middle">targetPort = where the</text>
+  <text class="who" x="427" y="126" text-anchor="middle">Service sends it</text>
+  <text class="who" x="602" y="110" text-anchor="middle">--host / --port in CMD</text>
+  <text class="who" x="602" y="126" text-anchor="middle">= the truth (yours)</text>
+  <text class="who" x="340" y="170" text-anchor="middle">The rule: targetPort must equal the port your process actually listens on.</text>
+</svg>
+<figcaption>Clients never need to know 8000. The Service hides it behind its own <code>port</code>.</figcaption>
+</figure>
+<p><b>port vs targetPort.</b> "A Service can map <em>any</em> incoming <code>port</code> to a <code>targetPort</code>. By default and for convenience, the <code>targetPort</code> is set to the same value as the <code>port</code> field"<span class="note"><a href="https://kubernetes.io/docs/concepts/services-networking/service/#defining-a-service">kubernetes.io, Defining a Service</a>.</span>. So a Service with <code>port: 80</code> and no <code>targetPort</code> sends traffic to port 80 on your pod, where nothing listens. Many customers use 80 by habit, so this is the classic mismatch.</p>
+<p><b>containerPort is a label, not a door.</b> The API reference says: "Not specifying a port here DOES NOT prevent that port from being exposed. Any port which is listening on the default "0.0.0.0" address inside a container will be accessible from the network"<span class="note"><a href="https://github.com/kubernetes/api/blob/master/core/v1/types.go">Kubernetes API source, Container.ports</a>.</span>. Like <code>EXPOSE</code>, it documents intent. It matters in one case: you can give it a <code>name</code> (say <code>http</code>) and the Service can then say <code>targetPort: http</code>.</p>
+<div class="callout"><b>The trap on your side: 127.0.0.1.</b> That last sentence said <em>listening on "0.0.0.0"</em>. A process bound to <code>127.0.0.1</code> (localhost) only accepts connections from inside its own pod. Uvicorn's default is exactly that: "<code>--host</code>… <b>Default:</b> '127.0.0.1'"<span class="note"><a href="https://www.uvicorn.org/settings/">Uvicorn docs, Settings</a>. Flask's and many dev servers' defaults are also localhost.</span>. On your laptop the browser is on the same machine, so it works. In a pod, every Service call is refused. That's why Lesson 4's <code>CMD</code> has <code>--host 0.0.0.0</code>.</div>
+
+<h2>3. Getting in from outside</h2>
+<p>A Service is only reachable inside the cluster unless its <code>type</code> says otherwise. This is the customer's decision, but you'll hear the words:</p>
+<table>
+<tr><th>They say</th><th>What it means</th></tr>
+<tr><td><b>ClusterIP</b> (the default)</td><td>"Exposes the Service on a cluster-internal IP… only reachable from within the cluster."</td></tr>
+<tr><td><b>NodePort</b></td><td>"Exposes the Service on each Node's IP at a static port", from a range that defaults to 30000-32767.</td></tr>
+<tr><td><b>LoadBalancer</b></td><td>"Exposes the Service externally using an external load balancer", usually one their cloud creates.</td></tr>
+<tr><td><b>Ingress</b> / <b>Gateway</b></td><td>Not a Service type. Separate objects that route HTTP(S) by hostname and path (<code>forecast.bank.example/api</code>) to ClusterIP Services, and can "terminate SSL / TLS". The Ingress API is frozen; the project now recommends Gateway<span class="note"><a href="https://kubernetes.io/docs/concepts/services-networking/ingress/">kubernetes.io, Ingress</a>. Types table: <a href="https://kubernetes.io/docs/concepts/services-networking/service/#publishing-services-service-types">Service types</a>.</span>.</td></tr>
+</table>
+<p>The most common setup for an HTTP app like yours: a <b>ClusterIP</b> Service, with their Ingress or Gateway in front doing hostnames and TLS. Your app can serve plain HTTP inside the pod. So <b>your</b> part of the answer is short: <em>"It speaks HTTP on port 8000, bound to 0.0.0.0. Point a ClusterIP Service's targetPort at 8000 and route to it from your Ingress or Gateway."</em></p>
+
+<h2>4. The Service for forecast-api</h2>
+<p>The manifest you'd ship next to the Lesson 3 Deployment. Click any line marked ●.</p>
+<div id="yx-svc"></div>
+
+<h2>5. Spot the line</h2>
+<p>A customer sends you their manifests, which don't work. They fixed each problem as they found it, so read each symptom as "with the previous one fixed". Click the line responsible.</p>
+<div id="spot"></div>
+
+<h2>6. Day-to-day stories</h2>
+<div class="story">
+<h3>Story A: the onboarding questionnaire</h3>
+<p>Before deploying <code>forecast-api</code>, the bank's platform team sends a form: <em>"Listening port? Protocol? Does the container terminate TLS? Health endpoint?"</em> You answer: 8000, HTTP, no TLS in the container (their Gateway terminates it), health at <code>/health</code>. They create a ClusterIP Service with <code>port: 80</code>, <code>targetPort: 8000</code> and an HTTPRoute for <code>forecast.bank.example</code>. You never touched a Service, but your answer decided its <code>targetPort</code>.</p>
+</div>
+<div class="story">
+<h3>Story B: "works on my laptop"</h3>
+<p>A teammate adds a new Docker image for a small admin UI with <code>CMD ["flask", "run"]</code>. On their laptop it works. At the customer, every request through the Service gets <code>connection refused</code>, yet the pods are Running and the EndpointSlice lists them. Endpoints present plus connection refused means something on the right IP isn't listening on the right interface or port. Flask's dev server binds to localhost by default. Adding <code>--host 0.0.0.0</code> fixes it.</p>
+</div>
+<div class="story">
+<h3>Story C: the 503 after a relabel</h3>
+<p>The customer's team "tidied up" their labels, changing the Deployment's template to <code>app.kubernetes.io/name: forecast-api</code>. Their Ingress now returns 503. The pods are fine, but <code>kubectl get endpointslices</code> shows <code>&lt;none&gt;</code>: the Service still selects <code>app: forecast-api</code>. A Service doesn't fail when its selector stops matching. It just goes quiet. They update the selector, and traffic is back.</p>
+</div>
+
+<hr>
+
+<h2>7. A customer asks… <span class="score"></span></h2>
+
+<div class="quiz" data-answer="2">
+  <p class="q">A customer's Service says <code>port: 80</code>, <code>targetPort: 80</code>. Your app listens on 8000. Calls to the Service…</p>
+  <button>succeed, since Kubernetes falls back to containerPort</button>
+  <button>succeed, since Services detect the listening port</button>
+  <button>get refused, since nothing listens on 80</button>
+  <p class="why">The Service forwards to <code>targetPort</code> and nothing else. It never inspects which ports are open, and a numeric <code>targetPort</code> doesn't consult <code>containerPort</code>. Fix: <code>targetPort: 8000</code>.</p>
+</div>
+
+<div class="quiz" data-answer="0">
+  <p class="q">The bank says: "Your Service is ClusterIP. How do our users reach it at <code>forecast.bank.example</code>?" Best answer?</p>
+  <button>Route that hostname to it through your Ingress or Gateway</button>
+  <button>Change type to LoadBalancer and set that hostname inside it</button>
+  <button>Change type to NodePort and set nodePort to port 443</button>
+  <p class="why">Hostname (and path) routing plus TLS is the Ingress/Gateway job, with a ClusterIP Service behind it. A LoadBalancer gives an external IP, not hostname routing. And 443 is outside the default NodePort range of 30000-32767, so the API would reject it.</p>
+</div>
+
+<div class="quiz" data-answer="1">
+  <p class="q">Your app runs in namespace <code>ml</code> and must call Service <code>model-server</code> (port 8080) in namespace <code>serving</code>. Which URL works?</p>
+  <button>http://model-server:8080</button>
+  <button>http://model-server.serving:8080</button>
+  <button>http://serving.model-server:8080</button>
+  <p class="why">A bare name is searched in the caller's <em>own</em> namespace first (<code>model-server.ml.svc.cluster.local</code>), which doesn't exist. The DNS docs' example: a pod in <code>test</code> can resolve <code>data.prod</code> or <code>data.prod.svc.cluster.local</code>. Format: service first, then namespace. Put this URL in config, not code (Lesson 6).</p>
+</div>
+
+<div class="quiz" data-answer="2">
+  <p class="q">Pods are Running, but the customer's Ingress returns 503 and the EndpointSlice shows <code>&lt;none&gt;</code>. What do you compare first?</p>
+  <button>Ingress port against the Service port number</button>
+  <button>containerPort against the EXPOSE line in Dockerfile</button>
+  <button>Service selector against the pod template labels</button>
+  <p class="why">No endpoints means the selector matched no pods. Port numbers don't affect whether pods are <em>selected</em>; they only matter once traffic is sent. This is Story C.</p>
+</div>
+
+<div class="quiz" data-answer="1">
+  <p class="q">You delete the whole <code>ports:</code> block (the <code>containerPort</code>) from the Deployment. The Service has <code>targetPort: 8000</code>. Traffic…</p>
+  <button>stops, because port 8000 is now closed</button>
+  <button>still arrives, because containerPort is only informational</button>
+  <button>stops, because the Service needs a containerPort</button>
+  <p class="why">"Not specifying a port here DOES NOT prevent that port from being exposed." Only a <em>named</em> <code>targetPort</code> (like <code>http</code>) would break, because there would be no port with that name to look up. Keep <code>containerPort</code> anyway, as documentation.</p>
+</div>
+
+<div class="quiz" data-answer="0">
+  <p class="q">On your laptop, <code>uvicorn app.main:app</code> works in the browser. In the cluster, every connection to the pod's IP is refused. Why?</p>
+  <button>uvicorn binds 127.0.0.1 by default, which is pod-internal</button>
+  <button>the pod IP changes too often for clients</button>
+  <button>the Service blocks direct calls to pod IPs</button>
+  <p class="why">Localhost inside a container means "this pod only". Your laptop browser was on the same machine, so it worked there. Add <code>--host 0.0.0.0</code>. Services don't block anything, and a pod's IP is stable for that pod's lifetime.</p>
+</div>
+
+<hr>
+
+<div class="callout source"><b>Primary source, read this next (~15 min):</b> <a href="https://kubernetes.io/docs/concepts/services-networking/service/">kubernetes.io, Service</a>, from the top through "Service type". Keep <a href="https://kubernetes.io/docs/tasks/debug/debug-application/debug-service/">Debug Services</a> for when a customer says "we can't reach it": it's the official step-by-step checklist (DNS → Service definition → EndpointSlices → pods). Compressed version: the <a href="../reference/services-and-ports.html">Services cheat sheet</a>.</div>
+
+<div class="callout ask"><b>Questions? Ask me.</b> For example: <em>"what's the difference between Ingress and Gateway in practice?"</em>, <em>"should my app do HTTPS itself?"</em>, or <em>"my app also has a metrics port; does it need its own Service?"</em></div>
+
+<hr>
+
+<h2>Appendix: break a Service on your own cluster</h2>
+<p>~10 minutes on your Docker machine. You need a cluster: in Docker Desktop, open Settings → Kubernetes → Enable Kubernetes. On the EC2 box, install <a href="https://kind.sigs.k8s.io/docs/user/quick-start/">kind</a> and run <code>kind create cluster</code>. You'll run nginx (it listens on port 80), put a Service in front with three <em>different</em> numbers, then break the selector.</p>
+<div class="quiz" data-answer="1">
+  <p class="q">Predict: nginx listens on 80, the Service has <code>port 8080</code>, and you run <code>kubectl port-forward service/web 5000:8080</code>. Which address do you open?</p>
+  <button>http://localhost:8080</button>
+  <button>http://localhost:5000</button>
+  <button>http://localhost:80</button>
+  <p class="why">port-forward's first number is on <em>your laptop</em>, the second is the Service's <code>port</code>. Kubernetes then maps that to <code>targetPort</code> 80 on a pod. Three numbers, one chain.</p>
+</div>
+<div class="quiz" data-answer="2">
+  <p class="q">Predict: you change the Service's selector to <code>app=nope</code>. What does the EndpointSlice show?</p>
+  <button>the same two pod IPs, unchanged</button>
+  <button>an error: no such label exists</button>
+  <button>nothing: ENDPOINTS shows &lt;none&gt;</button>
+  <p class="why">A selector is a query, so matching nothing is valid (you predicted this before Lesson 3). The controller re-evaluates and empties the list. The pods themselves are untouched.</p>
+</div>
+<p>Now run the commands, one at a time. Click a line marked ● to see what every part means.</p>
+<div id="yx-lab"></div>
+<p>They're identical in every shell. Copy them from here. <code>port-forward</code> keeps running: open <code>http://localhost:5000</code>, see the nginx welcome page, then press <kbd>Ctrl</kbd>+<kbd>C</kbd> to continue.</p>
+<p><b>PowerShell</b></p>
+<pre>kubectl get nodes
+kubectl create deployment web --image=nginx:1.27 --replicas=2
+kubectl expose deployment web --port=8080 --target-port=80
+kubectl get endpointslices -l kubernetes.io/service-name=web
+kubectl port-forward service/web 5000:8080
+kubectl set selector service web app=nope
+kubectl get endpointslices -l kubernetes.io/service-name=web
+kubectl delete deployment,service web</pre>
+<p><b>CMD</b></p>
+<pre>kubectl get nodes
+kubectl create deployment web --image=nginx:1.27 --replicas=2
+kubectl expose deployment web --port=8080 --target-port=80
+kubectl get endpointslices -l kubernetes.io/service-name=web
+kubectl port-forward service/web 5000:8080
+kubectl set selector service web app=nope
+kubectl get endpointslices -l kubernetes.io/service-name=web
+kubectl delete deployment,service web</pre>
+<p><b>macOS / Linux</b></p>
+<pre>kubectl get nodes
+kubectl create deployment web --image=nginx:1.27 --replicas=2
+kubectl expose deployment web --port=8080 --target-port=80
+kubectl get endpointslices -l kubernetes.io/service-name=web
+kubectl port-forward service/web 5000:8080
+kubectl set selector service web app=nope
+kubectl get endpointslices -l kubernetes.io/service-name=web
+kubectl delete deployment,service web</pre>
+<p><b>Expected:</b> the first <code>get endpointslices</code> lists two pod IPs under <code>ENDPOINTS</code> with <code>PORTS 80</code> (the targetPort, not 8080). The second shows <code>&lt;none&gt;</code>. <b>Bonus:</b> before deleting, run <code>kubectl set selector service web app=web</code> and check again. The list fills back up, because the Service controller never stops reconciling (Lesson 1).</p>
+
+<div class="next"><span><a href="0004-a-kubernetes-friendly-dockerfile.html">← Lesson 4: Kubernetes-friendly Dockerfile</a></span><span>Next: config and Secrets →</span></div>
+</main>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/yaml-explain.js"></script>
+<script>
+YamlExplain.mount(document.getElementById("yx-svc"), `
+apiVersion: v1
+kind: Service
+metadata:
+  name: forecast-api
+spec:
+  type: ClusterIP
+  selector:
+    app: forecast-api
+  ports:
+  - name: http
+    protocol: TCP
+    port: 80
+    targetPort: 8000
+`, {
+  1: "<b>apiVersion: v1</b>: Services live in the <em>core</em> API group, which has no group name, so it's just <code>v1</code>. Compare the Deployment's <code>apps/v1</code>.",
+  2: "<b>kind: Service</b>: this object is a Service, so the Service and EndpointSlice controllers manage it, not the Deployment controller.",
+  3: "<b>metadata:</b> the Service's identity: name, namespace, labels.",
+  4: "<b>name: forecast-api</b>: the Service's name, which also becomes its <b>DNS name</b>. Pods in the same namespace reach it at <code>http://forecast-api</code>, and pods elsewhere at <code>forecast-api.&lt;namespace&gt;</code>. Using the same name as the Deployment is a convention, not a link. The selector is the link.",
+  5: "<b>spec:</b> the desired state: which pods, which ports, what kind of exposure.",
+  6: "<b>type: ClusterIP</b>: reachable only inside the cluster, through a virtual IP Kubernetes assigns. It's the default, so this line is optional, but writing it makes the intent obvious. The customer's Ingress or Gateway sits in front for outside traffic.",
+  7: "<b>selector:</b> which pods receive traffic: every pod whose labels include all the pairs below. It's a live query, re-run whenever pods come and go. Note: Services use a plain map here, with no <code>matchLabels:</code> wrapper like the Deployment has.",
+  8: "<b>app: forecast-api</b>: must match the pod template's <code>labels</code> in the Deployment. If it doesn't, the Service is still created, but its EndpointSlice is empty: <code>&lt;none&gt;</code>.",
+  9: "<b>ports:</b> the list of ports this Service offers. An app with a second port (metrics, gRPC) adds a second list item.",
+  10: "<b>- name: http</b>: the <code>-</code> starts a list item. <code>http</code> names this Service port. Names are required once there's more than one port, and Ingress/Gateway rules can refer to them.",
+  11: "<b>protocol: TCP</b>: the transport protocol. <code>TCP</code> is the default (others: <code>UDP</code>, <code>SCTP</code>). HTTP runs over TCP, so this is right for a web API.",
+  12: "<b>port: 80</b>: the port <em>clients dial</em> on the Service: <code>http://forecast-api:80</code>, or just <code>http://forecast-api</code> since 80 is HTTP's default. It's the customer's choice and doesn't need to match anything in your image.",
+  13: "<b>targetPort: 8000</b>: where the Service <em>sends</em> traffic on each selected pod. <b>This is the one number that must match your app</b>: uvicorn's <code>--port 8000</code>, bound to <code>0.0.0.0</code>. If left out, it defaults to <code>port</code> (80), and calls are refused. It can also be a name, such as <code>targetPort: http</code>, if the Deployment names its <code>containerPort</code> <code>http</code>.",
+});
+
+YamlExplain.mount(document.getElementById("yx-lab"), `
+kubectl get nodes
+kubectl create deployment web --image=nginx:1.27 --replicas=2
+kubectl expose deployment web --port=8080 --target-port=80
+kubectl get endpointslices -l kubernetes.io/service-name=web
+kubectl port-forward service/web 5000:8080
+kubectl set selector service web app=nope
+kubectl get endpointslices -l kubernetes.io/service-name=web
+kubectl delete deployment,service web
+`, {
+  1: "<b>kubectl get nodes</b>: lists the cluster's nodes. It's a check that kubectl is talking to your local cluster. Expect one node with <code>STATUS Ready</code> (Docker Desktop calls it <code>docker-desktop</code>, kind calls it <code>kind-control-plane</code>).",
+  2: "<b>kubectl create deployment web</b>: creates a Deployment named <code>web</code> without writing YAML. <code>--image=nginx:1.27</code> = the official nginx image, pinned to the 1.27 line. It listens on port 80. <code>--replicas=2</code> = two pods, so the Service has two endpoints. kubectl labels the pods <code>app=web</code> automatically.",
+  3: "<b>kubectl expose deployment web</b>: creates a Service named <code>web</code>, copying the Deployment's selector (<code>app=web</code>). <code>--port=8080</code> = the Service's <code>port</code>, what clients dial. <code>--target-port=80</code> = the <code>targetPort</code>, where nginx actually listens. Different on purpose, so you can see the mapping. No <code>--type</code> means ClusterIP.",
+  4: "<b>kubectl get endpointslices</b>: lists EndpointSlice objects. <code>-l</code> = filter by label. <code>kubernetes.io/service-name=web</code> = the label Kubernetes puts on every slice it builds for Service <code>web</code>. <code>ENDPOINTS</code> shows the pod IPs, and <code>PORTS</code> shows the targetPort, 80.",
+  5: "<b>kubectl port-forward service/web 5000:8080</b>: tunnels from your laptop into the cluster. <code>service/web</code> = go through Service <code>web</code> (kubectl picks one of its pods). <code>5000</code> = the port opened on <em>your</em> machine (<code>localhost:5000</code>). <code>8080</code> = the Service's port, which maps to targetPort 80 on the pod. It keeps running until Ctrl+C.",
+  6: "<b>kubectl set selector service web app=nope</b>: replaces the Service's selector with <code>app=nope</code>, a label no pod has. This simulates Story C's relabel. Nothing is rejected, because matching zero pods is valid.",
+  7: "<b>kubectl get endpointslices … (again)</b>: same command as line 4. Now <code>ENDPOINTS</code> is <code>&lt;none&gt;</code>: the Service exists, but no pods match it.",
+  8: "<b>kubectl delete deployment,service web</b>: deletes both objects named <code>web</code>. <code>deployment,service</code> = a comma-separated list of kinds. Deleting the Deployment also removes its ReplicaSet and pods, and deleting the Service removes its EndpointSlices.",
+});
+</script>
+<script src="../assets/spot-line.js"></script>
+<script>
+SpotLine.mount(document.getElementById("spot"), `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: forecast-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: forecast-api }
+  template:
+    metadata:
+      labels: { app: forecast-api }
+    spec:
+      containers:
+      - name: forecast-api
+        image: ghcr.io/acme/forecast-api:v1.4.2
+        command: ["uvicorn", "app.main:app", "--port", "8000"]
+        ports:
+        - containerPort: 8000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: forecast-api
+spec:
+  type: NodePort
+  selector:
+    app: forecast
+  ports:
+  - port: 80
+    targetPort: 8080
+    nodePort: 8000
+`, {
+  tasks: [
+    { q: "\"<code>kubectl apply</code> fails on the Service: <code>provided port is not in the valid range. The range of valid ports is 30000-32767</code>.\"", answer: 31,
+      fix: "Delete the line and let Kubernetes pick a free port in the range, or choose one such as <code>30080</code>. Better still: <code>type: ClusterIP</code> behind their Ingress or Gateway, with no node ports at all." },
+    { q: "\"The Service exists now, but <code>kubectl get endpointslices -l kubernetes.io/service-name=forecast-api</code> shows <code>ENDPOINTS &lt;none&gt;</code>.\"", answer: 27,
+      fix: "<code>app: forecast-api</code>, matching line 11. Labels match exactly, so <code>forecast</code> is a different value, not a prefix." },
+    { q: "\"Endpoints are listed now. Inside a pod, <code>localhost:8000/health</code> answers. From another pod, <code>&lt;pod-ip&gt;:8000</code> gets <code>connection refused</code>.\"", answer: 16,
+      fix: "Add <code>\"--host\", \"0.0.0.0\"</code>, or delete the <code>command</code> line so the image's own <code>CMD</code> (which already has it) runs. The bug is a flag that's <em>missing</em>." },
+    { q: "\"<code>&lt;pod-ip&gt;:8000</code> works now, but <code>http://forecast-api/health</code> from another pod still gets <code>connection refused</code>.\"", answer: 30,
+      fix: "<code>targetPort: 8000</code>, the port the app really listens on. Or name the container port <code>http</code> and use <code>targetPort: http</code>." },
+  ],
+  notes: {
+    1: "<b>apiVersion: apps/v1</b>: the Deployment's API group (<code>apps</code>) and version (<code>v1</code>). Correct.",
+    2: "<b>kind: Deployment</b>: the first object in this file is a Deployment. Correct.",
+    3: "<b>metadata:</b> the Deployment's own identity (name, labels), not the pods'.",
+    4: "<b>name: forecast-api</b>: the Deployment's name and the prefix of its ReplicaSet and pod names. Services don't use it: they find pods by label, never by Deployment name.",
+    5: "<b>spec:</b> the Deployment's desired state.",
+    6: "<b>replicas: 2</b>: keep two pods, so the Service should list two endpoints. Fine.",
+    7: "<b>selector:</b> how the Deployment finds its own pods. This is separate from the Service's selector further down.",
+    8: "<b>matchLabels: { app: forecast-api }</b>: matches the template labels on line 11, so the API accepts the Deployment. Fine.",
+    9: "<b>template:</b> the pod blueprint. Changing anything below causes a rollout.",
+    10: "<b>metadata:</b> the <em>pods'</em> metadata this time.",
+    11: "<b>labels: { app: forecast-api }</b>: the label every pod gets. This is what <em>any</em> Service selector has to match, value for value.",
+    12: "<b>spec:</b> the pod's spec.",
+    13: "<b>containers:</b> the containers in each pod. One here.",
+    14: "<b>- name: forecast-api</b>: the container's name inside the pod (used by <code>kubectl logs -c</code>). Not related to networking.",
+    15: "<b>image: ghcr.io/acme/forecast-api:v1.4.2</b>: your image, from the GitHub registry, pinned tag <code>v1.4.2</code>. Fine: the pods start, so this isn't the network problem.",
+    16: "<b>command: [\"uvicorn\", \"app.main:app\", \"--port\", \"8000\"]</b>: <code>command</code> <em>overrides</em> the image's ENTRYPOINT, and the image's <code>CMD</code> is then ignored too, so your Dockerfile's <code>--host 0.0.0.0</code> is gone. <code>app.main:app</code> = the app object in <code>app/main.py</code>. <code>--port 8000</code> = listen on 8000. With no <code>--host</code>, uvicorn uses its default, <code>127.0.0.1</code>: reachable only from inside the pod.",
+    17: "<b>ports:</b> the list of ports the container declares. It's informational.",
+    18: "<b>- containerPort: 8000</b>: documents that the app listens on 8000. Correct, and it agrees with the command. It doesn't open or forward anything, and the Service's <code>targetPort</code> doesn't read it.",
+    19: "<b>---</b>: YAML's document separator. One file can hold several objects, and <code>kubectl apply -f</code> creates each in turn.",
+    20: "<b>apiVersion: v1</b>: Services are in the core group, plain <code>v1</code>. Correct.",
+    21: "<b>kind: Service</b>: the second object is a Service.",
+    22: "<b>metadata:</b> the Service's identity.",
+    23: "<b>name: forecast-api</b>: the Service name, and so its DNS name: <code>http://forecast-api</code> from the same namespace. Fine.",
+    24: "<b>spec:</b> the Service's desired state.",
+    25: "<b>type: NodePort</b>: also open a port on <em>every node's</em> IP. Valid, but a node port must come from the range 30000-32767 by default. ClusterIP plus an Ingress or Gateway is the usual choice for an HTTP app.",
+    26: "<b>selector:</b> the label query for pods. Services use a plain map, with no <code>matchLabels</code>.",
+    27: "<b>app: forecast</b>: selects pods labelled <code>app=forecast</code>. The pods are labelled <code>app=forecast-api</code> (line 11). Label values match exactly, so this selects nothing.",
+    28: "<b>ports:</b> the Service's port list.",
+    29: "<b>- port: 80</b>: clients dial <code>forecast-api:80</code>. The customer's choice. Fine as it is.",
+    30: "<b>targetPort: 8080</b>: the Service sends traffic to port 8080 on each pod. Your app listens on 8000, so every call through the Service is refused.",
+    31: "<b>nodePort: 8000</b>: the port to open on every node. It has to be inside the cluster's node-port range (default 30000-32767), so the API rejects 8000. Normally you leave this out and Kubernetes assigns one.",
+  },
+});
+</script>
+</body></html>

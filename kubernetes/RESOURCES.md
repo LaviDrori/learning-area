@@ -47,6 +47,22 @@
   Official Dockerfile hygiene guide. Use for: image size, caching, USER.
 - [Python docs: PYTHONUNBUFFERED / sys.stdout buffering](https://docs.python.org/3/using/cmdline.html#envvar-PYTHONUNBUFFERED)
   Non-interactive stdout is block-buffered; the env var disables it. Use for: Python logging in containers.
+- [Docs: Service (kubernetes.io)](https://kubernetes.io/docs/concepts/services-networking/service/)
+  Why Services exist (ephemeral pod IPs), selector → EndpointSlices, port vs targetPort ("targetPort is set to the same value as the port"), Service types, NodePort range 30000-32767. Use for: anything Service. Raw source on GitHub is easier to grep.
+- [Task: Debug Services (kubernetes.io)](https://kubernetes.io/docs/tasks/debug/debug-application/debug-service/)
+  Official checklist: DNS → Service definition → EndpointSlices (`<none>` = selector mismatch) → pods. Use for: "we can't reach your app".
+- [Docs: DNS for Services and Pods (kubernetes.io)](https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/)
+  `svc.namespace.svc.cluster.local`, search-path expansion, cross-namespace example (`data.prod`). Use for: service-to-service URLs.
+- [Docs: Ingress (kubernetes.io)](https://kubernetes.io/docs/concepts/services-networking/ingress/)
+  HTTP(S) routing, TLS termination, Ingress controllers. Notes the API is frozen and Gateway is recommended. Use for: "how do outside users reach it".
+- [Gateway API (gateway-api.sigs.k8s.io)](https://gateway-api.sigs.k8s.io/)
+  Ingress's successor: Gateway + HTTPRoute. Use for: modern customer setups.
+- [Task: Port forwarding (kubernetes.io)](https://kubernetes.io/docs/tasks/access-application-cluster/port-forward-access-application-cluster/)
+  `kubectl port-forward` to pod/deployment/service, local:remote syntax. Use for: hands-on access.
+- [Uvicorn docs: Settings](https://www.uvicorn.org/settings/)
+  `--host` default is `127.0.0.1`; use `0.0.0.0`. Use for: "connection refused" on Python apps.
+- [Kubernetes API source: core/v1 types.go](https://github.com/kubernetes/api/blob/master/core/v1/types.go)
+  Field docs verbatim, e.g. containerPort "DOES NOT prevent that port from being exposed", targetPort semantics. Use for: exact field semantics.
 
 ## Wisdom (Communities)
 

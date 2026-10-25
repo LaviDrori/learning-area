@@ -183,7 +183,7 @@ docker run --rm -e PYTHONUNBUFFERED=1 python:3.12-slim python -c "import time; [
 docker run --rm -e PYTHONUNBUFFERED=1 python:3.12-slim python -c "import time; [print(i) or time.sleep(1) for i in range(5)]"</pre>
 <p><b>Expected:</b> run 1 shows nothing for about 5 seconds, then <code>0 1 2 3 4</code> all at once. Run 2 shows one number per second. <b>Bonus:</b> add <code>-t</code> to run 1 (<code>docker run --rm -t …</code>). Docker then attaches a terminal, Python switches to line buffering, and the numbers come out one per second even without the variable. That's why "it works on my machine" in a terminal doesn't prove your logs work in a cluster.</p>
 
-<div class="next"><span><a href="0003-from-git-push-to-running-pod.html">← Lesson 3: Git push to pod</a></span><span>Next: Services and ports →</span></div>
+<div class="next"><span><a href="0003-from-git-push-to-running-pod.html">← Lesson 3: Git push to pod</a></span><span><a href="0005-services-and-ports.html">Next: Services and ports →</a></span></div>
 </main>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/spot-line.js"></script>
