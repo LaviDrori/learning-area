@@ -6,7 +6,7 @@
 <link rel="stylesheet" href="../assets/course.css">
 </head>
 <body><main>
-<div class="crumbs">Lessons: <a href="../lessons/0001-what-a-query-is-billed-for.html">1</a> · Reference: <a href="query-cost.html">Query cost</a></div>
+<div class="crumbs">Lessons: <a href="../lessons/0001-what-a-query-is-billed-for.html">1</a> · <a href="../lessons/0002-each-user-sees-only-their-rows.html">2</a> · Reference: <a href="query-cost.html">Query cost</a> · <a href="row-security.html">Row security</a></div>
 <h1>Glossary</h1>
 <p class="subtitle">The course's single source of truth for terms. Lessons use these words exactly as defined here. Definitions are quoted or adapted from Google Cloud's BigQuery docs.</p>
 
@@ -35,6 +35,21 @@
 <tr><td><b>require_partition_filter</b></td><td>Table option: queries without a pruning filter on the partitioning column fail.</td><td><a href="https://docs.cloud.google.com/bigquery/docs/querying-partitioned-tables">docs</a> · L1</td></tr>
 <tr><td><b>Clustering</b></td><td>Rows sorted into blocks by up to four columns. Order matters: the first column takes precedence.</td><td><a href="https://docs.cloud.google.com/bigquery/docs/clustered-tables">docs</a> · L1</td></tr>
 <tr><td><b>Block pruning</b></td><td>Skipping blocks of a clustered table that the filter rules out. Happens at run time, so dry runs can't show it.</td><td><a href="https://docs.cloud.google.com/bigquery/docs/clustered-tables">docs</a> · L1</td></tr>
+</table>
+
+<h2>Who sees which rows</h2>
+<table>
+<tr><th>Term</th><th>Meaning</th><th>From</th></tr>
+<tr><td><b>Row access policy</b></td><td>A named filter on one table, applied to the identities in its grantee list. A table can have many; a person sees the union of the ones that grant them, or zero rows if none do.</td><td><a href="https://docs.cloud.google.com/bigquery/docs/row-level-security-intro">docs</a> · L2</td></tr>
+<tr><td><b>Row-level security</b></td><td>The feature made of row access policies.</td><td><a href="https://docs.cloud.google.com/bigquery/docs/row-level-security-intro">docs</a> · L2</td></tr>
+<tr><td><b>Grantee list</b></td><td>The <code>GRANT TO (…)</code> part: <code>user:</code>, <code>group:</code>, <code>serviceAccount:</code>, <code>domain:</code>, <code>allAuthenticatedUsers</code>.</td><td><a href="https://docs.cloud.google.com/bigquery/docs/managing-row-level-security">docs</a> · L2</td></tr>
+<tr><td><b>Filter expression</b></td><td>The <code>FILTER USING (…)</code> part. Works like a WHERE clause; may use a subquery and <code>SESSION_USER()</code>. <code>TRUE</code> = all rows.</td><td><a href="https://docs.cloud.google.com/bigquery/docs/managing-row-level-security">docs</a> · L2</td></tr>
+<tr><td><b>SESSION_USER()</b></td><td>The email of the identity running the query. For an app using a service account, that's the service account.</td><td><a href="https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/security_functions">docs</a> · L2</td></tr>
+<tr><td><b>Mapping table</b></td><td>A table of (identity, key) pairs that one policy or view looks up via <code>SESSION_USER()</code>, so access changes by editing rows. Course term, not Google's.</td><td>L2</td></tr>
+<tr><td><b>Authorized view</b></td><td>A view in its own dataset, granted read access to the source dataset, so users can query the view without access to the source.</td><td><a href="https://docs.cloud.google.com/bigquery/docs/authorized-views">docs</a> · L2</td></tr>
+<tr><td><b>Authorized dataset</b></td><td>A whole dataset of views granted access to a source dataset at once.</td><td><a href="https://docs.cloud.google.com/bigquery/docs/authorized-views">docs</a> · L2</td></tr>
+<tr><td><b>Service account</b></td><td>A non-human identity an app uses to call Google APIs, written <code>name@project.iam.gserviceaccount.com</code>.</td><td>L2</td></tr>
+<tr><td><b>Side channel</b></td><td>Learning hidden data indirectly, e.g. from query duration or bytes processed. Why BigQuery hides bytes stats on row-secured tables.</td><td><a href="https://docs.cloud.google.com/bigquery/docs/best-practices-row-level-security">docs</a> · L2</td></tr>
 </table>
 </main></body>
 </html>

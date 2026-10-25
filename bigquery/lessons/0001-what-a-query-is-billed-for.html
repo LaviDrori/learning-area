@@ -118,7 +118,7 @@
 <h2>6. Cap your app's bill</h2>
 <p>Your app can ask for an estimate (dry run) and set a hard cap (<b>maximum bytes billed</b>) on every job: "If the number of estimated bytes is beyond the limit, then the query fails without incurring a charge."<span class="note"><a href="https://docs.cloud.google.com/bigquery/docs/best-practices-costs">Control costs</a> · <a href="https://docs.cloud.google.com/bigquery/docs/samples/bigquery-query-dry-run">Dry-run sample</a></span></p>
 <div id="yx-py"></div>
-<div class="callout"><b>Two catches.</b> ① The cap checks the <em>estimate</em>, so on clustered tables a query can fail even though its real bill would have fit. Leave headroom. ② On tables protected by row-level security, "dry runs always return 0 bytes". Your printed estimate goes blind there. That's <a href="#next">Lesson 2</a>'s topic.</div>
+<div class="callout"><b>Two catches.</b> ① The cap checks the <em>estimate</em>, so on clustered tables a query can fail even though its real bill would have fit. Leave headroom. ② On tables protected by row-level security, "dry runs always return 0 bytes". Your printed estimate goes blind there. That's <a href="0002-each-user-sees-only-their-rows.html">Lesson 2</a>'s topic.</div>
 
 <h2>7. Spot the line</h2>
 <p>This is <code>forecast-app</code>'s nightly feature pull. It needs one day of four columns, yet it costs about $13 a night. Each symptom assumes the previous one is fixed. Click the guilty line.</p>
@@ -193,7 +193,7 @@
 </ol>
 <p><b>Expected:</b> tiny queries show 10 MB billed (the per-table minimum). If <code>gb_billed</code> is empty for every row, your project is on capacity pricing (Story C). Tell me what you found next session, and I'll use it in Lesson 2.</p>
 
-<div class="next" id="next"><span>BigQuery · Lesson 1</span><span>Next: row-level security, each user sees only their own rows →</span></div>
+<div class="next" id="next"><span>BigQuery · Lesson 1</span><a href="0002-each-user-sees-only-their-rows.html">Next: row-level security, each user sees only their own rows →</a></div>
 </main>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/scan-sim.js"></script>

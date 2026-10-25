@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Row Security Cheat Sheet</title>
+<link rel="stylesheet" href="../assets/course.css">
+<style> pre .c { color: var(--muted); } </style>
+</head>
+<body><main>
+<div class="crumbs">Lessons: <a href="../lessons/0001-what-a-query-is-billed-for.html">1</a> · <a href="../lessons/0002-each-user-sees-only-their-rows.html">2</a> · Reference: <a href="glossary.html">Glossary</a> · <a href="query-cost.html">Query cost</a></div>
+<h1>Row Security</h1>
+<p class="subtitle">Who sees which rows. Sources: <a href="https://docs.cloud.google.com/bigquery/docs/row-level-security-intro">Row-level security intro</a> · <a href="https://docs.cloud.google.com/bigquery/docs/managing-row-level-security">Use row-level security</a> · <a href="https://docs.cloud.google.com/bigquery/docs/best-practices-row-level-security">Best practices</a> · <a href="https://docs.cloud.google.com/bigquery/docs/authorized-views">Authorized views</a>.</p>
+
+<h2>What a person sees</h2>
+<ol>
+  <li>No read access to the table → <b>Access Denied</b>. A policy never grants access.</li>
+  <li>Table has no policies → <b>every row</b>.</li>
+  <li>Policies exist, none grants them → <b>zero rows, no error</b>.</li>
+  <li>One or more grant them → the <b>union</b> of those policies' filters.</li>
+</ol>
+
+<h2>Two-policy setup</h2>
+<pre>CREATE ROW ACCESS POLICY full_access                      <span class="c">-- create this one first</span>
+ON `acme-dw.forecast.predictions`                         <span class="c">-- one table per policy</span>
+GRANT TO ('group:data-eng@acme.com',                      <span class="c">-- user: group: serviceAccount: domain:</span>
+          'serviceAccount:forecast-app@forecast-app-prod.iam.gserviceaccount.com')
+FILTER USING (TRUE);                                      <span class="c">-- all rows: maintainers, writers</span>
+
+CREATE ROW ACCESS POLICY own_stores
+ON `acme-dw.forecast.predictions`
+GRANT TO ('group:store-managers@acme.com')
+FILTER USING (store_id IN (                               <span class="c">-- like a WHERE clause</span>
+  SELECT store_id FROM `acme-dw.security.store_access`    <span class="c">-- grantees need read on it; ≤100 MB result</span>
+  WHERE email = SESSION_USER()));                         <span class="c">-- email of whoever runs the query</span>
+
+DROP ROW ACCESS POLICY own_stores ON `acme-dw.forecast.predictions`;   <span class="c">-- not the last one</span>
+DROP ALL ROW ACCESS POLICIES ON `acme-dw.forecast.predictions`;        <span class="c">-- needed for the last one</span></pre>
+<p>List: console <b>View row access policies</b>, or <code>bq ls --row_access_policies project:dataset.table</code>. Members change only via DDL.</p>
+
+<h2>Policy killers and keepers</h2>
+<table>
+<tr><th>Drops policies ✗</th><th>Keeps policies ✓</th></tr>
+<tr><td><code>CREATE OR REPLACE TABLE</code></td><td><code>TRUNCATE TABLE</code> + <code>INSERT</code></td></tr>
+<tr><td><code>WRITE_TRUNCATE</code>, <code>bq load --replace</code></td><td><code>WRITE_APPEND</code>, <code>MERGE</code>, DML</td></tr>
+<tr><td>table copy onto it (unless appending); delete or expiry</td><td></td></tr>
+</table>
+
+<h2>Side effects</h2>
+<ul>
+  <li>Policy filters <b>don't prune</b> partitions or clusters. Avoid filtering on partitioning/clustering columns; send your own filter too.</li>
+  <li>Bytes stats are <b>hidden</b>: dry run = 0 bytes, <code>total_bytes_billed</code> empty in <code>INFORMATION_SCHEMA.JOBS</code>.</li>
+  <li>Not with: legacy SQL, wildcard tables, table preview, JSON columns. BI Engine and materialized views don't accelerate.</li>
+  <li>Filtered users get <b>no write access</b>. Don't grant <code>bigquery.filteredDataViewer</code> via IAM: policies grant it.</li>
+  <li>Use within your organization. Side channels (query duration) exist.</li>
+</ul>
+
+<h2>Which tool</h2>
+<table>
+<tr><th>Tool</th><th>Use when</th></tr>
+<tr><td>Authorized view</td><td>share a subset of rows <em>and</em> columns; users never touch the table. View in its own dataset, authorized on the source dataset, same region.</td></tr>
+<tr><td>Row access policy</td><td>many people, one dashboard, each sees their slice of the same table.</td></tr>
+<tr><td>Separate tables</td><td>third parties; isolation; row counts must stay secret.</td></tr>
+</table>
+
+<h2>Your app's identity</h2>
+<table>
+<tr><th>App queries as</th><th><code>SESSION_USER()</code></th><th>Enforced by</th></tr>
+<tr><td>one service account</td><td>the service account</td><td>your app's WHERE (never AI-written SQL)</td></tr>
+<tr><td>the user's OAuth credentials</td><td>the user</td><td>BigQuery policies</td></tr>
+<tr><td>one service account per tenant</td><td>tenant's account</td><td>BigQuery policies (few tenants)</td></tr>
+</table>
+</main></body>
+</html>

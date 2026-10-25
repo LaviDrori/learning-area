@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Each User Sees Only Their Rows</title>
+<link rel="stylesheet" href="../assets/course.css">
+<style>
+  .story { border-left: 3px solid var(--rule); padding-left: 1rem; margin: 1rem 0; }
+</style>
+</head>
+<body><main>
+<div class="crumbs">BigQuery · Lesson 2 · <a href="0001-what-a-query-is-billed-for.html">← Lesson 1</a> · <a href="../reference/glossary.html">Glossary</a> · <a href="../reference/row-security.html">Row security cheat sheet</a></div>
+
+<h1>Each User Sees Only Their Rows</h1>
+<p class="subtitle">Row access policies, <code>SESSION_USER()</code>, authorized views, and the service account that quietly breaks all of it. ~25 minutes.</p>
+
+<div class="goal"><strong>Your win today:</strong> write the two row access policies that let each store manager see only their own stores in your <code>forecast.predictions</code> table, predict exactly which rows any person gets, and find the two lines in <code>forecast-app</code> that would show every manager every store.</div>
+
+<h2>0. Predict first <span class="score"></span></h2>
+<p>Guess even if you're unsure. A wrong guess now makes the right answer stick better later.</p>
+<div class="quiz" data-answer="1">
+  <p class="q">Your <code>predictions</code> table gets one row access policy, granted to the store managers' group. Bob, an analyst who can read the table but isn't in that group, runs <code>SELECT *</code>. He gets…</p>
+  <button>every row, because he can read the table</button>
+  <button>zero rows, and no error message at all</button>
+  <button>an Access Denied error naming the policy</button>
+  <p class="why">"Any users or groups not specifically included in the allowed list are denied access", and denied here means filtered to nothing, not an error. That's why the moment you add the <em>first</em> policy, "users that previously had full access must be added to a <code>TRUE</code> filter to maintain their access."<span class="note"><a href="https://docs.cloud.google.com/bigquery/docs/row-level-security-intro">Intro to row-level security</a></span></p>
+</div>
+<div class="quiz" data-answer="2">
+  <p class="q"><code>forecast-app</code>'s dashboard backend runs every query with its own service account. A policy filters on <code>email = SESSION_USER()</code>. Maria opens the dashboard. Inside the policy, <code>SESSION_USER()</code> returns…</p>
+  <button>Maria's email, passed along by the app</button>
+  <button>NULL, since an app isn't a human user</button>
+  <button>the service account's own email address</button>
+  <p class="why"><code>SESSION_USER()</code> "returns the email address of the user that's running the query". The one running it is whoever's credentials sent the job: your service account. BigQuery never hears of Maria. Section 5 is about this trap.<span class="note"><a href="https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/security_functions">Security functions</a></span></p>
+</div>
+
+<h2>1. Three ways to hide rows</h2>
+<p>Google compares three tools. Same goal, different strength:<span class="note"><a href="https://docs.cloud.google.com/bigquery/docs/row-level-security-intro">Intro to row-level security</a>, "Comparison…"</span></p>
+<table>
+<tr><th>Tool</th><th>How</th><th>Google's verdict</th></tr>
+<tr><td><b>Authorized view</b></td><td>Users query a view in another dataset. The view may read the table; the users may not.</td><td>"Recommended for flexibility." Can share any subset of rows <em>and</em> columns. Open to crafted-query and timing side channels.</td></tr>
+<tr><td><b>Row access policy</b></td><td>Users query the table itself. BigQuery adds a hidden filter based on who they are.</td><td>"Recommended for a balance of flexibility and security." The fit for "people who all use the same dashboard, even if some people have access to more data than others."</td></tr>
+<tr><td><b>Separate tables</b></td><td>One table (or dataset, or project) per tenant, each with its own IAM.</td><td>"Recommended for security." "Users cannot infer data without access to the table." Use for third parties, or "when the total number of rows must be secret."</td></tr>
+</table>
+<p>The customer's store managers on one shared dashboard is the textbook case for row access policies. That's most of this lesson.</p>
+
+<h2>2. How a row access policy works</h2>
+<p>A policy is attached to one table and has two parts: a <b>grantee list</b> (who it applies to) and a <b>filter</b> that "functions like a <code>WHERE</code> clause".<span class="note"><a href="https://docs.cloud.google.com/bigquery/docs/managing-row-level-security">Use row-level security</a></span> When someone queries the table, BigQuery decides what they see in three steps:</p>
+<ol>
+  <li><b>Can they read the table at all?</b> "A user must first have access to a BigQuery table to be able to query it", even if a policy names them. No table access → Access Denied.</li>
+  <li><b>Does the table have any policies?</b> None → every row, as before.</li>
+  <li><b>Which policies grant them?</b> None → zero rows, silently. One or more → the rows that pass <em>any</em> of their filters (the union). That's why a <code>FILTER USING (TRUE)</code> policy for admins works alongside a narrow one for everyone else.</li>
+</ol>
+<p>Grantees are written as <code>user:…</code>, <code>group:…</code>, <code>serviceAccount:…</code>, <code>domain:acme.com</code> or <code>allAuthenticatedUsers</code>. Inside a filter, <code>SESSION_USER()</code> is the querying identity's email, so one policy can serve everyone: "only rows for <em>my</em> stores".</p>
+<p>Try it. The table is a day of predictions for three stores. The mapping table <code>security.store_access</code> says Maria manages store 12 and Li manages stores 12 and 42.</p>
+<ol>
+  <li>With <b>own_stores only</b>, compare Maria, Li and Dana (a data engineer).</li>
+  <li>Switch to <b>both policies</b>. What changed for Dana, and why didn't it change for Bob?</li>
+  <li>Pick <b>Maria, via forecast-app</b> under both policies. Who does BigQuery think is asking?</li>
+</ol>
+<div id="rls"></div>
+
+<h2>3. Write the two policies</h2>
+<p>This is the setup Google's best-practices page recommends: one policy for people who need everything "for data maintenance or support", and one with "filters based on business logic … granted to specific groups".<span class="note"><a href="https://docs.cloud.google.com/bigquery/docs/best-practices-row-level-security">Best practices for row-level security</a></span> Click each line marked ●.</p>
+<div id="yx-policy"></div>
+<div class="callout"><b>Why a mapping table?</b> Without it you'd write one policy per store. The lookup lets a single policy serve every manager, and the customer changes access by editing rows in <code>store_access</code>, not by running DDL.<span class="note"><a href="https://docs.cloud.google.com/bigquery/docs/managing-row-level-security">Use row-level security</a></span> Two costs: grantees need read access on <code>store_access</code> too ("grantees must have the <code>bigquery.tables.getData</code> permission on the target and referenced tables"), and the subquery's result is capped at 100 MB.</div>
+
+<h2>4. What row security does to cost and to your writes</h2>
+<ul>
+  <li><b>Filters don't prune.</b> "Row-level access policy filters don't participate in query pruning on partitioned and clustered tables." <code>own_stores</code> filters on <code>store_id</code>, your first clustering column, but a manager's query still reads every store's blocks unless the dashboard <em>also</em> sends <code>store_id = 12</code> itself. Google: "Try to avoid making row access policies that filter on clustered and partitioned columns."<span class="note"><a href="https://docs.cloud.google.com/bigquery/docs/best-practices-row-level-security">Best practices</a></span></li>
+  <li><b>The numbers go dark.</b> "BigQuery hides sensitive statistics on all queries against tables with row-level security", including bytes processed and billed. Dry runs "always return 0 bytes" (Lesson 1's catch), and <code>total_bytes_billed</code> in <code>INFORMATION_SCHEMA.JOBS</code> stays empty, so cost reports built on it come out low.<span class="note"><a href="https://docs.cloud.google.com/bigquery/docs/estimate-costs">Estimate costs</a></span></li>
+  <li><b>Replacing the table drops the policies.</b> <code>CREATE OR REPLACE TABLE</code> and <code>WRITE_TRUNCATE</code> (including <code>bq load --replace</code>) delete them. <code>TRUNCATE TABLE</code> keeps them. With no policies left, everyone with table access sees every row.<span class="note"><a href="https://docs.cloud.google.com/bigquery/docs/row-level-security-intro">Intro</a>, "implicit deletion"</span></li>
+  <li><b>Readers mustn't write.</b> "Don't grant table write permissions to users who should only see filtered data." A writer could change the rows other users see.</li>
+</ul>
+
+<h2>5. The one-service-account trap</h2>
+<p>Policies key on <em>who runs the query</em>. If <code>forecast-app</code> sends every user's query with one service account, BigQuery sees one user. You have three honest options:</p>
+<table>
+<tr><th>Your app queries as…</th><th><code>SESSION_USER()</code></th><th>Who enforces "own rows"</th><th>Fits when</th></tr>
+<tr><td>one service account for everyone</td><td>the service account</td><td>your app's own <code>WHERE store_id IN …</code></td><td>you wrote every query. Never for SQL an AI generates.</td></tr>
+<tr><td>the end user (their OAuth credentials)</td><td>the user's email</td><td>BigQuery's policies</td><td>users have Google or <a href="https://docs.cloud.google.com/bigquery/docs/managing-row-level-security">workforce federation</a> identities</td></tr>
+<tr><td>one service account per tenant</td><td>that tenant's account</td><td>BigQuery's policies (<code>serviceAccount:</code> grantees)</td><td>a handful of tenants, not thousands</td></tr>
+</table>
+<p>Querying with users' own OAuth credentials instead of "common credentials set based on a Single-Service Account" also gives you per-user audit logs and quotas.<span class="note"><a href="https://www.doit.com/blog/implementing-multi-tenant-security-transparently-and-effectively-in-bigquery-via-your-preferred-bi">DoiT, multi-tenant security in BigQuery</a> (practitioner article)</span> The cost: each user now needs permission to run jobs and read the table. That's <a href="#next">Lesson 3</a>.</p>
+
+<h2>6. The other tool: an authorized view</h2>
+<p>Sometimes the customer wants managers to see only some <em>columns</em> too, and never touch the table. Then you put a view in a separate dataset and authorize it: "Principals can view the data you share and run queries on it, but they can't access the source dataset directly."<span class="note"><a href="https://docs.cloud.google.com/bigquery/docs/authorized-views">Authorized views</a></span></p>
+<div id="yx-view"></div>
+<p>Then two grants, both in the console's Sharing menus: on the <code>forecast</code> dataset, <b>authorize the view</b> (the view may read it); on <code>shared_views</code>, give the managers' group <b>BigQuery Data Viewer</b> (they may read the view). The datasets must be in the same region. One catch: if the source table also has row access policies, the view's results are still "filtered according to the underlying source table's row-level access policies", so managers then need a policy too.</p>
+
+<h2>7. Spot the line</h2>
+<p>Here's <code>forecast-app</code>'s dashboard backend and nightly refresh. The service account is in <code>full_access</code>, since it writes the table. Each symptom assumes the previous one is fixed. Click the guilty line.</p>
+<div id="spot"></div>
+
+<h2>8. Day-to-day stories</h2>
+<div class="story">
+<h3>Story A: the assistant that answered too well</h3>
+<p>A store manager asks <code>forecast-app</code>'s AI assistant "how does my store compare with the others?" Your backend runs as the service account and normally appends <code>WHERE store_id IN (…)</code> to <em>your</em> queries. But the assistant writes its own SQL, and it helpfully leaves the filter out. Every store's numbers reach a manager who shouldn't see them. The fix isn't a better prompt: the assistant's queries run with the <em>user's</em> credentials, so <code>own_stores</code> filters them whatever SQL the model writes.</p>
+</div>
+<div class="story">
+<h3>Story B: the morning everyone saw everything</h3>
+<p>Your nightly job reloads <code>predictions</code> with <code>WRITE_TRUNCATE</code>. The next morning Bob, who saw zero rows yesterday, sees every store, and the console's row access policies list is empty: the replace deleted both policies. You switch the job to <code>TRUNCATE TABLE</code> then <code>INSERT</code> (or a <code>MERGE</code>, Lesson 6), which keeps them, and add a check that lists the table's policies after each run and alerts when the list is empty.</p>
+</div>
+<div class="story">
+<h3>Story C: "can a manager work out other stores' numbers?"</h3>
+<p>The customer's security team asks. Your honest answer, from Google's own page: row-level security can leak through side channels such as query duration, which "requires many repeated attempts over a range of key values". BigQuery hides the bytes statistics for that reason. If even that risk is too much, as for an outside partner, use separate tables. Row-level security is for use "within your organization", and filtered users get no write access.<span class="note"><a href="https://docs.cloud.google.com/bigquery/docs/best-practices-row-level-security">Best practices</a></span></p>
+</div>
+
+<hr>
+<h2>9. A customer asks… <span class="score"></span></h2>
+<div class="quiz" data-answer="2">
+  <p class="q">Eve is in the store managers' group, so <code>own_stores</code> grants her. Nobody gave her read access on the <code>forecast</code> dataset. Her query gets…</p>
+  <button>her own stores' rows, as the policy says</button>
+  <button>zero rows, with no error message shown</button>
+  <button>Access Denied, before any policy applies</button>
+  <p class="why">"A user must first have access to a BigQuery table to be able to query it." A policy narrows what readers see. It never makes someone a reader.</p>
+</div>
+<div class="quiz" data-answer="0">
+  <p class="q">Li is in both <code>data-eng</code> and the store managers' group, so both <code>full_access</code> and <code>own_stores</code> grant her. She sees…</p>
+  <button>every row, the union of both filters</button>
+  <button>only stores 12 and 42, the narrower</button>
+  <button>zero rows, since the policies conflict</button>
+  <p class="why">A row is returned if <em>any</em> policy that grants you lets it through. <code>TRUE</code> lets everything through. The narrower policy can't take rows away.</p>
+</div>
+<div class="quiz" data-answer="1">
+  <p class="q">Your nightly job must replace all of <code>predictions</code>' rows and keep its row access policies. Which keeps them?</p>
+  <button>CREATE OR REPLACE TABLE … AS SELECT</button>
+  <button>TRUNCATE TABLE, then INSERT … SELECT</button>
+  <button>a query job with WRITE_TRUNCATE set</button>
+  <p class="why"><code>CREATE OR REPLACE TABLE</code> and <code>WRITE_TRUNCATE</code> drop the table's policies. "<code>TRUNCATE TABLE</code> does not remove policies."</p>
+</div>
+<div class="quiz" data-answer="2">
+  <p class="q">Your app runs a dry run before each manager's query on <code>predictions</code>. It always prints 0 bytes. Why?</p>
+  <button>the query cache already answered it all</button>
+  <button>row security filters every block away</button>
+  <button>stats are hidden to block side channels</button>
+  <p class="why">On row-level-secured tables "dry runs always return 0 bytes", to prevent side-channel attacks. Your estimate is blind here, so lean on <code>maximum_bytes_billed</code> and filters the dashboard sends itself.</p>
+</div>
+<div class="quiz" data-answer="0">
+  <p class="q">The customer will share forecasts with an outside supplier, who must not even learn how many rows other suppliers have. Best tool?</p>
+  <button>separate tables, one for each supplier</button>
+  <button>one row access policy per supplier</button>
+  <button>one authorized view with SESSION_USER</button>
+  <p class="why">Google: separate tables are "a good choice when you need to share data with others and you need to keep data isolated", for "third-party partners and vendors, when the total number of rows must be secret". Row security is for use within your organization.</p>
+</div>
+
+<hr>
+<div class="callout source"><b>Primary source, read this next (~15 min):</b> <a href="https://docs.cloud.google.com/bigquery/docs/row-level-security-intro">Google Cloud, Introduction to BigQuery row-level security</a>, then <a href="https://docs.cloud.google.com/bigquery/docs/best-practices-row-level-security">Best practices for row-level security</a>, which is short and is exactly what the customer's security team will ask about.</div>
+<div class="callout ask"><b>Questions? Ask me.</b> For example: <em>"how do I run BigQuery queries with a user's OAuth token from Python?"</em>, <em>"does Tableau or Looker Studio pass the viewer's identity?"</em>, or <em>"should own_stores filter on a non-clustered column instead?"</em></div>
+
+<hr>
+<h2>Appendix: on your next office day (Tue/Wed, ~10 min)</h2>
+<p>On your work account. Nothing here reads table data, so it costs nothing.</p>
+<ol>
+  <li><b>Meet your own identity.</b> In a new query tab, run the line below. It reads no table. Then ask whoever runs <code>forecast-app</code> (or check its config) which identity its queries use. If it's a service account, that's what every policy sees.</li>
+</ol>
+<div id="yx-me"></div>
+<ol start="2">
+  <li><b>Look for existing policies.</b> In the Explorer, open a customer table that dashboards read. If it has policies, the table's page offers <b>View row access policies</b>. Or list them from a terminal with the <code>bq</code> tool (replace project, dataset and table with a real one):</li>
+</ol>
+<p><b>PowerShell</b></p>
+<pre>bq ls --row_access_policies acme-dw:forecast.predictions</pre>
+<p><b>CMD</b></p>
+<pre>bq ls --row_access_policies acme-dw:forecast.predictions</pre>
+<p><b>macOS / Linux</b></p>
+<pre>bq ls --row_access_policies acme-dw:forecast.predictions</pre>
+<p><code>bq ls</code> lists resources; <code>--row_access_policies</code> lists a table's policies instead of tables; <code>acme-dw:forecast.predictions</code> is <code>project:dataset.table</code> (the <code>bq</code> tool separates project and dataset with a colon). You need permission to list policies, so "Access Denied" here is also an answer worth bringing back.</p>
+<p><b>Expected:</b> your own email from step 1. Tell me next session what identity <code>forecast-app</code> uses and whether any customer tables already have policies, and I'll use it in Lesson 3.</p>
+
+<div class="next" id="next"><span>BigQuery · Lesson 2</span><span>Next: who can do what, IAM roles, service accounts and the billing project →</span></div>
+</main>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/rls-sim.js"></script>
+<script src="../assets/yaml-explain.js"></script>
+<script src="../assets/spot-line.js"></script>
+<script>
+const SA = "forecast-app@forecast-app-prod.iam.gserviceaccount.com";
+const ACCESS = { "maria@acme.com": [12], "li@acme.com": [12, 42] };   // security.store_access
+const ownStores = { name: "own_stores", grantees: ["group:store-managers@acme.com"],
+  sql: "store_id IN (SELECT store_id FROM security.store_access WHERE email = SESSION_USER())",
+  filter: (row, me) => (ACCESS[me] || []).includes(row.store_id) };
+const fullAccess = { name: "full_access", grantees: ["group:data-eng@acme.com", "serviceAccount:" + SA],
+  sql: "TRUE", filter: () => true };
+
+RlsSim.mount(document.getElementById("rls"), {
+  table: "acme-dw.forecast.predictions",
+  columns: ["forecast_date", "store_id", "product_id", "predicted_qty"],
+  rows: [
+    { forecast_date: "2026-10-24", store_id: 12, product_id: 501, predicted_qty: 38 },
+    { forecast_date: "2026-10-24", store_id: 12, product_id: 502, predicted_qty: 11 },
+    { forecast_date: "2026-10-24", store_id: 42, product_id: 501, predicted_qty: 54 },
+    { forecast_date: "2026-10-24", store_id: 42, product_id: 503, predicted_qty: 7 },
+    { forecast_date: "2026-10-24", store_id: 77, product_id: 501, predicted_qty: 21 },
+    { forecast_date: "2026-10-24", store_id: 77, product_id: 502, predicted_qty: 16 }
+  ],
+  people: [
+    { label: "Maria, manager of store 12", runsAs: "maria@acme.com", groups: ["group:store-managers@acme.com"], tableAccess: true },
+    { label: "Li, manager of stores 12 and 42", runsAs: "li@acme.com", groups: ["group:store-managers@acme.com"], tableAccess: true },
+    { label: "Dana, data engineer", runsAs: "dana@acme.com", groups: ["group:data-eng@acme.com"], tableAccess: true },
+    { label: "Bob, analyst (reads the table, no group)", runsAs: "bob@acme.com", groups: [], tableAccess: true },
+    { label: "Eve, manager without table access", runsAs: "eve@acme.com", groups: ["group:store-managers@acme.com"], tableAccess: false,
+      note: "Eve is a grantee of <code>own_stores</code>, but nobody gave her read access to the table. A policy only narrows what a reader sees." },
+    { label: "Maria, via forecast-app (service account)", runsAs: SA, groups: [], tableAccess: true,
+      note: "The app sent the query with its own credentials, so BigQuery sees the service account, not Maria. Under <code>full_access</code> she gets every store." }
+  ],
+  scenarios: [
+    { label: "no policies yet", policies: [], note: "No policies: anyone who can read the table sees every row." },
+    { label: "own_stores only", policies: [ownStores], note: "The first policy turns everyone else's view to zero rows, Dana's included." },
+    { label: "both policies (recommended)", policies: [fullAccess, ownStores], note: "<code>full_access</code> restores Dana and the app's service account. Bob is in neither list, so he still gets nothing." }
+  ]
+});
+
+YamlExplain.mount(document.getElementById("yx-policy"), `
+CREATE ROW ACCESS POLICY full_access
+ON \`acme-dw.forecast.predictions\`
+GRANT TO ('group:data-eng@acme.com',
+          'serviceAccount:forecast-app@forecast-app-prod.iam.gserviceaccount.com')
+FILTER USING (TRUE);
+
+CREATE ROW ACCESS POLICY own_stores
+ON \`acme-dw.forecast.predictions\`
+GRANT TO ('group:store-managers@acme.com')
+FILTER USING (store_id IN (
+  SELECT store_id
+  FROM \`acme-dw.security.store_access\`
+  WHERE email = SESSION_USER()
+));
+`, {
+  1: "<code>CREATE ROW ACCESS POLICY</code> adds a named policy to one table; <code>full_access</code> is its name, unique on that table. Creating policies needs BigQuery Admin or Data Owner. Create this one <em>first</em>, so the people who maintain the table never lose their rows.",
+  2: "<code>ON</code> names the table the policy protects, as <code>project.dataset.table</code>. Backticks because <code>acme-dw</code> has a hyphen.",
+  3: "<code>GRANT TO (…)</code> is the grantee list: who this policy applies to. <code>'group:data-eng@acme.com'</code> is a Google group, so membership is managed in the customer's directory, not in SQL. Each entry is a separate quoted string, and every identity listed must exist or the statement fails.",
+  4: "<code>'serviceAccount:…'</code> adds <code>forecast-app</code>'s service account, which writes the table nightly and needs to see all of it. <code>forecast-app-prod.iam.gserviceaccount.com</code> shows it belongs to project <code>forecast-app-prod</code>. The <code>)</code> closes the grantee list.",
+  5: "<code>FILTER USING (TRUE)</code>: the filter is like a <code>WHERE</code> clause, and <code>TRUE</code> passes every row. So grantees of this policy see everything. The <code>;</code> ends the statement.",
+  7: "A second policy on the same table, named <code>own_stores</code>. A table can have many; a person sees the union of the policies that grant them.",
+  8: "The same table again.",
+  9: "Granted to the store managers' group only. Everyone not in this list or in <code>full_access</code> sees zero rows.",
+  10: "<code>FILTER USING (store_id IN (</code>: keep a row only if its <code>store_id</code> is in the list the subquery below returns. The subquery is re-evaluated for whoever is querying.",
+  11: "<code>SELECT store_id</code>: the subquery returns store IDs.",
+  12: "…from the customer's mapping table, one row per (email, store) pair. Grantees need read access on it too, and the subquery's result may be at most 100 MB.",
+  13: "<code>WHERE email = SESSION_USER()</code>: only the mapping rows for the person running the query. For Maria that's store 12; for Li, 12 and 42. If the query comes from a service account, this matches the account's email, which isn't in the table, so: zero rows.",
+  14: "<code>))</code> closes the <code>IN (</code> and the <code>FILTER USING (</code>; <code>;</code> ends the statement."
+});
+
+YamlExplain.mount(document.getElementById("yx-view"), `
+CREATE VIEW \`acme-dw.shared_views.my_store_forecast\` AS
+SELECT p.forecast_date, p.store_id, p.product_id, p.predicted_qty
+FROM \`acme-dw.forecast.predictions\` AS p
+JOIN \`acme-dw.security.store_access\` AS a
+  ON a.store_id = p.store_id
+WHERE a.email = SESSION_USER()
+  AND p.forecast_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY);
+`, {
+  1: "<code>CREATE VIEW</code> saves a query under a name; querying the view runs it. It lives in dataset <code>shared_views</code>, separate from the data, because authorization is granted dataset by dataset. <code>AS</code> starts the query.",
+  2: "Only these four columns are exposed. Any column you leave out (say, <code>model_version</code>) is invisible to view users: column control a row policy can't give you. <code>p.</code> refers to the alias set on the next line.",
+  3: "Reads your predictions table, aliased <code>p</code>. The managers can't read this table; the view can, once authorized.",
+  4: "Joins the mapping table, aliased <code>a</code>. Users don't need access to it either: the view reads it on their behalf.",
+  5: "<code>ON a.store_id = p.store_id</code>: pairs each prediction with the mapping rows for the same store.",
+  6: "<code>WHERE a.email = SESSION_USER()</code>: keep only pairs that belong to the person querying the view. Same idea as <code>own_stores</code>, but enforced by the view's SQL.",
+  7: "<code>AND p.forecast_date &gt;= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)</code>: the last 30 days. <code>CURRENT_DATE()</code> is today (UTC); <code>DATE_SUB(…, INTERVAL 30 DAY)</code> subtracts 30 days. It's a filter on the partitioning column, so it satisfies Lesson 1's <code>require_partition_filter</code>. <code>;</code> ends the statement."
+});
+
+YamlExplain.mount(document.getElementById("yx-me"), `
+SELECT SESSION_USER() AS me;
+`, {
+  1: "<code>SELECT</code> without <code>FROM</code> reads no table. <code>SESSION_USER()</code> returns the email of the identity running the query: yours here, the service account's when your app runs it. <code>AS me</code> names the output column. <code>;</code> ends the statement."
+});
+
+SpotLine.mount(document.getElementById("spot"), `
+# forecast-app: dashboard backend + nightly refresh
+from google.cloud import bigquery
+
+sa_client = bigquery.Client(project="forecast-app-prod")
+
+def user_client(user_creds):
+    return bigquery.Client(project="forecast-app-prod", credentials=user_creds)
+
+def store_forecast(user_creds, day):
+    sql = "SELECT store_id, product_id, predicted_qty FROM \`acme-dw.forecast.predictions\` WHERE forecast_date = @day"
+    cfg = bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("day", "DATE", day)])
+    return sa_client.query(sql, job_config=cfg).result()
+
+def nightly_refresh(staging_table):
+    cfg = bigquery.QueryJobConfig(destination="acme-dw.forecast.predictions",
+                                  write_disposition="WRITE_TRUNCATE")
+    sa_client.query(f"SELECT * FROM \`{staging_table}\`", job_config=cfg).result()
+`, {
+  tasks: [
+    { q: "Maria opens her store dashboard and sees <b>every store's</b> forecast.", answer: 12,
+      fix: "The query runs as the service account, which is in <code>full_access</code>. Use <code>user_client(user_creds).query(…)</code> so BigQuery sees Maria and applies <code>own_stores</code>. The helper existed; nobody called it." },
+    { q: "Now Maria gets an <b>Access Denied</b> error about creating jobs in project <code>forecast-app-prod</code>.", answer: 7,
+      fix: "Running a query is creating a job in the client's project, the billing project. Maria may not run jobs there. Either grant the managers' group the right to run jobs in <code>forecast-app-prod</code>, or run in a project they already can. Lesson 3 is exactly this." },
+    { q: "Bob saw zero rows yesterday. After last night's refresh he sees <b>every store</b>, and the table has no row access policies.", answer: 16,
+      fix: "<code>WRITE_TRUNCATE</code> replaces the table and deletes its policies. Run <code>TRUNCATE TABLE</code> and then <code>INSERT … SELECT</code>, which keeps them, or <code>MERGE</code> (Lesson 6). Then check the policies still exist after each run." }
+  ],
+  notes: {
+    1: "A comment (<code>#</code> to end of line). This file holds both the per-user dashboard query and the nightly job.",
+    2: "Imports Google's official BigQuery client library.",
+    4: "A client with no explicit credentials, so it uses the environment's: the app's service account. Jobs run in <code>forecast-app-prod</code>. Right for the nightly job; wrong for anything that should be filtered per user.",
+    6: "A helper that builds a client for one end user. <code>user_creds</code> is that user's OAuth credentials object, which your web app gets when they sign in with Google.",
+    7: "<code>bigquery.Client(project=…, credentials=user_creds)</code>: queries run <em>as the user</em>, so <code>SESSION_USER()</code> is their email. <code>project=\"forecast-app-prod\"</code> is still where the job runs and is billed, so the user needs permission to run jobs there.",
+    9: "The dashboard's query function. It receives the user's credentials and the day to show.",
+    10: "The SQL: three columns from the predictions table for one day. <code>@day</code> is a named query parameter, filled in safely by BigQuery rather than pasted into the string, so it can't be used for SQL injection.",
+    11: "A job config that sets <code>@day</code>: <code>ScalarQueryParameter(\"day\", \"DATE\", day)</code> is name, BigQuery type, Python value.",
+    12: "Runs the query with <code>sa_client</code>, the service account. <code>user_creds</code> arrived as an argument and is never used. <code>.result()</code> waits and returns the rows.",
+    14: "The nightly job. <code>staging_table</code> is where today's predictions were computed.",
+    15: "<code>destination=</code> writes the query's result into the predictions table instead of returning it.",
+    16: "<code>write_disposition=\"WRITE_TRUNCATE\"</code>: if the destination exists, replace all its data. <code>WRITE_APPEND</code> would add rows; <code>WRITE_EMPTY</code> would fail if it had any.",
+    17: "Runs <code>SELECT * FROM</code> the staging table as the service account (right here: it's a back-office job) and waits. The <code>f\"…\"</code> string inserts the table name, which comes from your own code, not a user."
+  }
+});
+</script>
+</body>
+</html>
