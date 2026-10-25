@@ -1,7 +1,7 @@
 # Mission: BigQuery
 
 ## Why
-Lavi's customer runs its data warehouse on BigQuery, and Lavi's BI/AI apps live inside it: they read the customer's tables, write results back, and Lavi builds tables, views and scheduled queries in the customer's project. Lavi already queries BigQuery regularly; the goal is to understand it well enough to build things that are cheap to run, secure per user, and easy to defend in front of the customer.
+Lavi's customer runs its data warehouse on BigQuery, and Lavi works with its People Analytics (HR analytics) team, where the recurring question is which data each employee may see. and Lavi's BI/AI apps live inside it: they read the customer's tables, write results back, and Lavi builds tables, views and scheduled queries in the customer's project. Lavi already queries BigQuery regularly; the goal is to understand it well enough to build things that are cheap to run, secure per user, and easy to defend in front of the customer.
 
 ## Success looks like
 - Predict roughly what a query will scan and cost before running it, and explain a surprising bill

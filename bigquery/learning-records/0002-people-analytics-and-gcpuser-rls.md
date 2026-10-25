@@ -1,0 +1,5 @@
+# Real context: People Analytics, RLS by `SESSION_USER() = gcpUser`
+
+Lavi's customer work is with the People Analytics (HR analytics) team, not sales: the everyday question is "which data can employee X see?". Their row-level security already exists as a direct comparison, `SESSION_USER() = gcpUser`, where `gcpUser` is a column on a separate access table holding a viewer's Google account email. Rules: self, manager → tree, HRBP → her tree, People Analytics → everyone. Enforcement is through authorized views; their agent queries as the user, and a service account writes agent turns.
+
+**Implications:** Lesson 2 was rebuilt on this setup, and all later lessons use HR data and the customer's real design, not the `orders`/stores example of Lesson 1. Lavi already works with a `SESSION_USER()`-based policy, so build on it rather than teach it from zero: JOIN duplicates when a viewer has several reasons, unfiltered views in an authorized dataset, copies of answers (agent turns), how joiners/leavers/re-orgs keep it right, what happens when an app or BI tool queries as a service account, and column-level protection for salary/performance. See [[MISSION.md]].

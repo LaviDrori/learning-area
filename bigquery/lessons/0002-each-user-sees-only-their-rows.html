@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Each User Sees Only Their Rows</title>
+<link rel="stylesheet" href="../assets/course.css">
+<style>
+  .story { border-left: 3px solid var(--rule); padding-left: 1rem; margin: 1rem 0; }
+  .flow svg text { font-family: var(--mono); font-size: 11px; fill: var(--fg); }
+  .flow svg .muted { fill: var(--muted); }
+  .flow svg .box { fill: var(--panel); stroke: var(--rule); }
+  .flow svg .key { fill: none; stroke: var(--accent); stroke-width: 1.5; }
+  .flow svg .arrow { stroke: var(--muted); stroke-width: 1.2; fill: none; marker-end: url(#ah); }
+  .flow svg .bad { stroke: var(--bad); stroke-dasharray: 4 3; }
+</style>
+</head>
+<body><main>
+<div class="crumbs">BigQuery · Lesson 2 · <a href="0001-what-a-query-is-billed-for.html">← Lesson 1</a> · <a href="../reference/glossary.html">Glossary</a> · <a href="../reference/row-security.html">Row security cheat sheet</a></div>
+
+<h1>Each User Sees Only Their Rows</h1>
+<p class="subtitle">Authorized views, the access table, <code>SESSION_USER()</code>, and the places HR data slips past the filter. ~25 minutes.</p>
+
+<div class="goal"><strong>Your win today:</strong> answer the People Analytics team's everyday question, <em>"which data can employee X see, and why?"</em>, with one query; predict exactly what any employee gets from the views; and find the four lines in a view that leak or duplicate HR rows.</div>
+
+<h2>0. Predict first <span class="score"></span></h2>
+<p>Guess even if you're unsure. A wrong guess now makes the right answer stick better later.</p>
+<div class="quiz" data-answer="1">
+  <p class="q">Shir joined this morning. She can read the views dataset, but tonight's job hasn't added her rows to the access table yet. She asks the agent about her own profile. She gets…</p>
+  <button>her own row, since everyone sees themselves</button>
+  <button>zero rows, and no error message at all</button>
+  <button>an Access Denied error on the view itself</button>
+  <p class="why">The view keeps rows whose <code>employee_id</code> is in <code>(SELECT … FROM access WHERE gcpUser = SESSION_USER())</code>. No access rows, empty list, empty result. "See yourself" is a <em>row in the access table</em>, not a rule BigQuery knows. Access Denied would mean she can't read the view at all.</p>
+</div>
+<div class="quiz" data-answer="2">
+  <p class="q">Yael is on the People Analytics team and also manages Gil, so the access table has two rows for (Yael, Gil). A view <code>JOIN</code>s employees to the access table on <code>employee_id</code>. Yael sees Gil…</p>
+  <button>once, since BigQuery removes duplicate rows</button>
+  <button>not at all, since the two reasons conflict</button>
+  <button>twice, once for each matching access row</button>
+  <p class="why">A <code>JOIN</code> returns one output row per matching pair. Two access rows, two copies of Gil, and every headcount Yael builds on that view is inflated. Filter with <code>IN (subquery)</code> instead, which only asks "is there a match?". Section 2 shows it.</p>
+</div>
+
+<h2>1. Your setup, named</h2>
+<p>This is the customer's design, in the words this course uses from now on:</p>
+<figure class="flow">
+<svg viewBox="0 0 640 250" role="img" aria-label="Employees, through the agent or dashboards, query views in hr_views as themselves. hr_views is an authorized dataset that may read the hr tables and the access table. Employees cannot read hr or security directly. A service account writes agent turns into agent.turns.">
+  <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor" class="muted"/></marker></defs>
+  <rect class="box" x="10" y="20" width="150" height="60" rx="4"/>
+  <text x="85" y="44" text-anchor="middle">employee</text><text x="85" y="62" text-anchor="middle" class="muted">via agent or dashboard</text>
+  <rect class="box key" x="240" y="20" width="160" height="60" rx="4"/>
+  <text x="320" y="44" text-anchor="middle">hr_views.*</text><text x="320" y="62" text-anchor="middle" class="muted">authorized dataset</text>
+  <rect class="box" x="480" y="10" width="150" height="40" rx="4"/>
+  <text x="555" y="34" text-anchor="middle">hr.* tables</text>
+  <rect class="box" x="480" y="60" width="150" height="40" rx="4"/>
+  <text x="555" y="84" text-anchor="middle">security.access</text>
+  <path class="arrow" d="M160,50 L238,50"/><text x="199" y="42" text-anchor="middle" class="muted">as self</text>
+  <path class="arrow" d="M400,42 L478,30"/><path class="arrow" d="M400,58 L478,80"/>
+  <path class="arrow bad" d="M85,80 C85,140 555,140 555,102"/><text x="320" y="152" text-anchor="middle" class="muted">✗ no direct read of hr or security</text>
+  <rect class="box" x="10" y="170" width="150" height="60" rx="4"/>
+  <text x="85" y="194" text-anchor="middle">agent's service</text><text x="85" y="212" text-anchor="middle">account</text>
+  <rect class="box" x="240" y="180" width="160" height="40" rx="4"/>
+  <text x="320" y="204" text-anchor="middle">agent.turns</text>
+  <path class="arrow" d="M160,200 L238,200"/><text x="199" y="192" text-anchor="middle" class="muted">writes</text>
+  <text x="420" y="196" class="muted">questions + answers,</text><text x="420" y="212" class="muted">copied out of the views</text>
+</svg>
+<figcaption>The only door to HR rows is a view. The views decide, per person, which rows come through. The agent's log is a second copy of what came through.</figcaption>
+</figure>
+<ul>
+  <li><b>Access table</b>, <code>security.access (gcpUser, employee_id, access_reason)</code>: one row per (viewer, employee they may see). The four rules become rows: <code>SELF</code>, <code>MANAGER_TREE</code> (everyone under a manager), <code>HRBP_TREE</code> (an HR business partner's population), <code>PEOPLE_ANALYTICS</code> (everyone).</li>
+  <li><b>Authorized view</b>: "Principals can view the data you share and run queries on it, but they can't access the source dataset directly." Your views live in <code>hr_views</code>; employees get read access there and nowhere else.<span class="note"><a href="https://docs.cloud.google.com/bigquery/docs/authorized-views">Authorized views</a></span></li>
+  <li><b>Authorized dataset</b>: instead of authorizing views one by one, <code>hr_views</code> as a whole is allowed to read <code>hr</code> and <code>security</code>. "All current and future views in an authorized dataset have access to the tables in the shared dataset."<span class="note"><a href="https://docs.cloud.google.com/bigquery/docs/authorized-datasets">Authorized datasets</a></span> Remember "future". It matters in section 4.</li>
+  <li><b><code>SESSION_USER()</code></b> "returns the email address of the user that's running the query": whoever's credentials sent the job. Your agent runs queries as the user, so it's the employee. A dashboard that runs on its owner's credentials, or a service account, would make it that identity instead.<span class="note"><a href="https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/security_functions">Security functions</a></span></li>
+</ul>
+
+<h2>2. The view, line by line</h2>
+<p>A clean version of a view in <code>hr_views</code>. Click each line marked ●.</p>
+<div id="yx-view"></div>
+<p>Now try it. Seven employees, the access table behind them, and two versions of the view: the one above (<code>IN</code>), and one that <code>JOIN</code>s the access table. Things to try:</p>
+<ol>
+  <li>Compare Noa, Dan and Rina on <b>v2</b>. Whose "tree" is whose?</li>
+  <li>Yael on <b>v1</b>, then on <b>v2</b>. Count Yael's own row and Gil's.</li>
+  <li>Noa <b>via a dashboard on Yael's credentials</b>. Who does BigQuery think is asking?</li>
+</ol>
+<div id="rls"></div>
+
+<h2>3. "Which data can employee X see?"</h2>
+<p>Because every rule is a row, the People Analytics team's everyday question is a query on the access table, not on the views. One query per direction:</p>
+<div id="yx-who"></div>
+<div class="callout"><b>What this answer covers.</b> It's exactly what X gets <em>through the views</em>. Anyone with direct read access to <code>hr</code> (platform admins, the people who build the views, service accounts that load the data) sees everything regardless. That list lives in IAM, not in the access table: <a href="#next">Lesson 3</a>.</div>
+
+<h2>4. Where HR rows slip past the filter</h2>
+<ul>
+  <li><b>An unfiltered view in the authorized dataset.</b> "All current and future views" in <code>hr_views</code> can read <code>hr</code>. A debug view <code>SELECT * FROM hr.employee_snapshot</code> created there is readable by every employee who can read <code>hr_views</code>. Drafts go in a dataset that isn't authorized.</li>
+  <li><b>Who may create or change views in <code>hr_views</code>.</b> They decide everyone's filter. Google requires them to have "<code>bigquery.tables.getData</code> on the referenced tables" too, so it's a short list of people who already see all of HR. Keep it short.<span class="note"><a href="https://docs.cloud.google.com/bigquery/docs/authorized-datasets">Authorized datasets</a></span></li>
+  <li><b>Copies of the answer.</b> Rows that leave a view lose its filter. <code>agent.turns</code> holds employees' questions and the HR answers the agent gave them. Anyone who can read that table reads everyone's answers. Story A fixes it.</li>
+  <li><b>The wrong identity.</b> Anything that queries the views as someone other than the employee: a dashboard on its owner's credentials, a scheduled query, a service account. It sees that identity's rows, and so does everyone it shows them to.</li>
+  <li><b>A stale access table.</b> After a re-org, the old manager sees the moved employee until the access table is rebuilt.</li>
+  <li><b>Side channels.</b> Google rates authorized views "Recommended for flexibility", but they "can be vulnerable to carefully crafted queries, query durations, and other types of side-channel attacks."<span class="note"><a href="https://docs.cloud.google.com/bigquery/docs/row-level-security-intro">Intro to row-level security</a>, comparison table</span></li>
+</ul>
+<div class="callout"><b>Cost side effect.</b> Results of queries that use <code>SESSION_USER()</code> are never cached. Neither are queries on row-level-secured tables. So every dashboard refresh through these views runs, and is billed, again. The cache is per user anyway.<span class="note"><a href="https://docs.cloud.google.com/bigquery/docs/cached-results">Cached results</a></span> Lesson 1's habits are what keep this cheap: few columns, and a literal <code>snapshot_date</code> filter from the caller.</div>
+
+<h2>5. Spot the line</h2>
+<p>A teammate's first version of the view. Each symptom assumes the previous one is fixed. Click the guilty line.</p>
+<div id="spot"></div>
+
+<h2>6. Day-to-day stories</h2>
+<div class="story">
+<h3>Story A: the agent's memory</h3>
+<p>The agent's service account writes every turn (who asked, the question, the SQL, the answer) to <code>agent.turns</code>. To show people their history, someone grants all employees read access on the <code>agent</code> dataset. Now Noa can read Dan's question "who on my team is a flight risk?" and the answer. The answers came through Dan's filter; the log has none. One fix that keeps the table where it is: two row access policies on it, the same pattern Google recommends for any table (one full-access policy for maintainers, one filtered policy for everyone else).<span class="note"><a href="https://docs.cloud.google.com/bigquery/docs/best-practices-row-level-security">Best practices for row-level security</a></span></p>
+<div id="yx-turns"></div>
+<p>Row access policies hide rows in place, so employees query <code>agent.turns</code> directly and each gets only their own turns. Two rules come with them: a person not named in any policy gets zero rows, and replacing the table (<code>CREATE OR REPLACE TABLE</code>, <code>WRITE_TRUNCATE</code>) deletes the policies. The service account must only ever <em>append</em>.<span class="note"><a href="https://docs.cloud.google.com/bigquery/docs/row-level-security-intro">Intro to row-level security</a></span></p>
+</div>
+<div class="story">
+<h3>Story B: Monday's re-org</h3>
+<p>Lia moves from Omer's team to Tal's on Monday morning. The access table is rebuilt nightly from the HR system. Until tonight, Omer still sees Lia and Tal doesn't. Nobody broke anything; that's the design. The question for the customer is how fresh access must be: rebuilding right after each HR system load is a scheduling choice, not a security feature.</p>
+</div>
+<div class="story">
+<h3>Story C: "why does Yael's headcount say 9? We have 7 people."</h3>
+<p>Yael is on People Analytics and manages Gil, so she has two access rows for herself (<code>SELF</code>, <code>PEOPLE_ANALYTICS</code>) and two for Gil. A view that <code>JOIN</code>s the access table counts both of them twice. Section 3's query answers it in seconds: group Yael's access rows by employee, and the ones with two reasons are the duplicates. The fix is <code>IN (subquery)</code> in the view, not <code>DISTINCT</code> in every dashboard.</p>
+</div>
+
+<hr>
+<h2>7. A customer asks… <span class="score"></span></h2>
+<div class="quiz" data-answer="0">
+  <p class="q">Bob is a contractor, not in the group that can read <code>hr_views</code>. He manages two people, so the access table has rows for him. He queries <code>hr_views.my_people</code>. He gets…</p>
+  <button>Access Denied, before any filter applies</button>
+  <button>his tree's rows, as the access table says</button>
+  <button>zero rows, with no error message shown</button>
+  <p class="why">The access table only narrows what a reader of the view gets. It never makes someone a reader. Reading the view needs a grant on <code>hr_views</code>.</p>
+</div>
+<div class="quiz" data-answer="2">
+  <p class="q">An engineer adds <code>hr_views.debug_all</code>, a <code>SELECT *</code> on <code>hr.employee_snapshot</code> with no filter. <code>hr_views</code> is an authorized dataset. Who can read every employee through it?</p>
+  <button>only the engineer who created the view</button>
+  <button>no one, until it's authorized by itself</button>
+  <button>everyone who can read the hr_views dataset</button>
+  <p class="why">"All current and future views in an authorized dataset have access to the tables in the shared dataset." No extra step authorizes it; being created there is enough.</p>
+</div>
+<div class="quiz" data-answer="1">
+  <p class="q">Dan refreshes his team dashboard, built on <code>hr_views.my_people</code>, twice in five minutes. Nothing changed. On-demand, the second refresh…</p>
+  <button>is free, served from the query cache</button>
+  <button>is billed again, as it isn't cached</button>
+  <button>is billed half, as a partial cache hit</button>
+  <p class="why">Queries that use non-deterministic functions such as <code>SESSION_USER()</code> aren't cached, and the view puts <code>SESSION_USER()</code> into every query on it.</p>
+</div>
+<div class="quiz" data-answer="1">
+  <p class="q">HR asks: "who can see Lia (E13) through the views, and why?" Fastest correct answer?</p>
+  <button>log in as each person and query the view</button>
+  <button>access rows WHERE employee_id = 'E13'</button>
+  <button>read the SQL of every view in hr_views</button>
+  <p class="why">Every rule is a row, so section 3's second query lists each viewer and their reasons. Add the IAM list of people who read <code>hr</code> directly for the complete answer.</p>
+</div>
+<div class="quiz" data-answer="0">
+  <p class="q">Employees can read <code>agent.turns</code> and should see only their own turns. It has a <code>gcpUser</code> column. Best fix?</p>
+  <button>row access policy on gcpUser per caller</button>
+  <button>trust the agent to only show own turns</button>
+  <button>have the service account write less data</button>
+  <p class="why">Employees can query the table directly, outside the agent, so the filter must live in BigQuery. A row access policy with <code>FILTER USING (gcpUser = SESSION_USER())</code> does exactly that, plus a <code>TRUE</code> policy for maintainers.</p>
+</div>
+
+<hr>
+<div class="callout source"><b>Primary source, read this next (~15 min):</b> <a href="https://docs.cloud.google.com/bigquery/docs/authorized-views">Google Cloud, Create an authorized view</a> and the short <a href="https://docs.cloud.google.com/bigquery/docs/authorized-datasets">Authorized datasets</a> page. Then the comparison table in <a href="https://docs.cloud.google.com/bigquery/docs/row-level-security-intro">Introduction to row-level security</a>, which the customer's security team will want to see.</div>
+<div class="callout ask"><b>Questions? Ask me.</b> For example: <em>"how do I build the MANAGER_TREE rows from the reporting lines?"</em>, <em>"should the base HR tables get row access policies too?"</em>, or <em>"how do I hide salary from managers but show it to HRBPs?"</em></div>
+
+<hr>
+<h2>Appendix: on your next office day (Tue/Wed, ~10 min)</h2>
+<p>On your work account, in the BigQuery console. Use the customer's real dataset and table names.</p>
+<ol>
+  <li><b>Meet your identity.</b> Run the line below. It reads no table, so it's free. That email is what <code>gcpUser</code> must match for you.</li>
+</ol>
+<div id="yx-me"></div>
+<ol start="2">
+  <li><b>What can you see, and why?</b> Run section 3's first query with your own email, if you can read the access table. Count the reasons per employee: any with two are duplicates waiting for a <code>JOIN</code>.</li>
+  <li><b>Authorized views or an authorized dataset?</b> Open the source HR dataset's <b>Sharing</b> menu and look under <b>Authorize views</b> and <b>Authorize datasets</b>. If it's a dataset, list who can create views in it.</li>
+  <li><b>Who can read the agent's turns?</b> Open the turns table's dataset sharing. Note every group with read access.</li>
+</ol>
+<p><b>Expected:</b> your own email from step 1, and a short list for steps 3–4. Bring them to the next session. Lesson 3 is about exactly those lists.</p>
+
+<div class="next" id="next"><span>BigQuery · Lesson 2</span><span>Next: who can do what: IAM roles, service accounts and the billing project →</span></div>
+</main>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/rls-sim.js"></script>
+<script src="../assets/yaml-explain.js"></script>
+<script src="../assets/spot-line.js"></script>
+<script>
+const ALL = ["E10", "E11", "E12", "E13", "E20", "E30", "E31"];
+const ACCESS = [   // security.access: [gcpUser, employee_id, access_reason]
+  ["noa@acme.com", "E11", "SELF"],
+  ["dan@acme.com", "E10", "SELF"], ...["E11", "E12", "E13"].map(e => ["dan@acme.com", e, "MANAGER_TREE"]),
+  ["rina@acme.com", "E20", "SELF"], ...["E10", "E11", "E12", "E13"].map(e => ["rina@acme.com", e, "HRBP_TREE"]),
+  ["yael@acme.com", "E30", "SELF"], ["yael@acme.com", "E31", "MANAGER_TREE"],
+  ...ALL.map(e => ["yael@acme.com", e, "PEOPLE_ANALYTICS"])
+];
+const reasons = (row, me) => ACCESS.filter(([u, e]) => u === me && e === row.employee_id).map(([, , r]) => r);
+const readers = ["group:all-employees@acme.com"];
+
+RlsSim.mount(document.getElementById("rls"), {
+  scopeLabel: "View",
+  reasonLabel: "access_reason",
+  grantLabel: p => `readable by ${p.grantees.join(", ")} · ${p.sql}`,
+  columns: ["employee_id", "full_name", "department", "manager_id"],
+  rows: [
+    { employee_id: "E10", full_name: "Dan Levi", department: "R&D", manager_id: "E02" },
+    { employee_id: "E11", full_name: "Noa Cohen", department: "R&D", manager_id: "E10" },
+    { employee_id: "E12", full_name: "Omer Katz", department: "R&D", manager_id: "E10" },
+    { employee_id: "E13", full_name: "Lia Ben-David", department: "R&D", manager_id: "E12" },
+    { employee_id: "E20", full_name: "Rina Azulay", department: "HR", manager_id: "E02" },
+    { employee_id: "E30", full_name: "Yael Mor", department: "People Analytics", manager_id: "E02" },
+    { employee_id: "E31", full_name: "Gil Paz", department: "People Analytics", manager_id: "E30" }
+  ],
+  people: [
+    { label: "Noa, employee", runsAs: "noa@acme.com", groups: readers, tableAccess: true },
+    { label: "Dan, manager of Noa and Omer (Omer manages Lia)", runsAs: "dan@acme.com", groups: readers, tableAccess: true },
+    { label: "Rina, HRBP for R&D", runsAs: "rina@acme.com", groups: readers, tableAccess: true },
+    { label: "Yael, People Analytics, manages Gil", runsAs: "yael@acme.com", groups: readers, tableAccess: true },
+    { label: "Shir, joined today (no access rows yet)", runsAs: "shir@acme.com", groups: readers, tableAccess: true },
+    { label: "Bob, contractor (can't read hr_views)", runsAs: "bob@acme.com", groups: [], tableAccess: false,
+      note: "Bob isn't in a group with read access on <code>hr_views</code>. The access table can't change that." },
+    { label: "Noa, via the agent (runs as Noa)", runsAs: "noa@acme.com", groups: readers, tableAccess: true,
+      note: "The agent sends the query with Noa's own credentials, so <code>SESSION_USER()</code> is Noa. Same rows as Noa in the console." },
+    { label: "Noa, via a dashboard on Yael's credentials", runsAs: "yael@acme.com", groups: readers, tableAccess: true,
+      note: "The dashboard runs every query as its owner, Yael. BigQuery never hears of Noa: she sees all of HR." }
+  ],
+  scenarios: [
+    { label: "v2: WHERE employee_id IN (access subquery)",
+      policies: [{ name: "my_people", grantees: readers, sql: "WHERE employee_id IN (SELECT employee_id FROM access WHERE gcpUser = SESSION_USER())",
+        filter: (row, me) => reasons(row, me).length ? [reasons(row, me).join(" + ")] : [] }],
+      note: "<code>IN</code> asks only whether a match exists, so each employee comes back once, whatever the number of reasons." },
+    { label: "v1: JOIN access ON employee_id",
+      policies: [{ name: "my_people_v1", grantees: readers, sql: "JOIN access a ON … WHERE a.gcpUser = SESSION_USER()",
+        filter: (row, me) => reasons(row, me) }],
+      note: "A <code>JOIN</code> returns one row per matching access row. Two reasons, two copies." }
+  ]
+});
+
+YamlExplain.mount(document.getElementById("yx-view"), `
+CREATE OR REPLACE VIEW \`acme-dw.hr_views.my_people\` AS
+SELECT
+  e.snapshot_date,
+  e.employee_id,
+  e.full_name,
+  e.department,
+  e.manager_id,
+  e.job_level
+FROM \`acme-dw.hr.employee_snapshot\` AS e
+WHERE e.employee_id IN (
+  SELECT employee_id
+  FROM \`acme-dw.security.access\`
+  WHERE gcpUser = SESSION_USER()
+);
+`, {
+  1: "<code>CREATE OR REPLACE VIEW</code> saves a query under a name, replacing any view of that name. A view stores no data: querying it runs this SQL. It lives in <code>hr_views</code>, the authorized dataset, so it may read <code>hr</code> and <code>security</code> even though employees can't. Backticks because <code>acme-dw</code> has a hyphen. <code>AS</code> starts the query.",
+  2: "The column list starts. Only the columns named below are visible through the view.",
+  3: "<code>e.snapshot_date</code>: the day of the HR snapshot (the table's partitioning column). Exposed so callers can filter on a literal date. The view is expanded into the caller's query, so that filter still prunes partitions.",
+  4: "<code>e.employee_id</code>: the employee key, the same key the access table uses. <code>e.</code> refers to the alias set on line 9.",
+  5: "<code>e.full_name</code>: the employee's name.",
+  6: "<code>e.department</code>: their department.",
+  7: "<code>e.manager_id</code>: their manager's <code>employee_id</code>, so dashboards can draw the tree.",
+  8: "<code>e.job_level</code>: their level. No trailing comma: last column. What's <em>not</em> here matters as much: no salary or performance columns. Column control is something a view gives you that a row filter can't.",
+  9: "Reads the daily HR snapshot table, aliased <code>e</code>. Employees have no access to this table; the view does.",
+  10: "<code>WHERE e.employee_id IN (</code>: keep an employee only if their ID is in the list the subquery returns. <code>IN</code> checks membership, so an ID listed twice still returns the row once.",
+  11: "<code>SELECT employee_id</code>: the subquery returns employee IDs…",
+  12: "…from the access table, one row per (viewer, employee, reason).",
+  13: "<code>WHERE gcpUser = SESSION_USER()</code>: only the access rows whose viewer is the person running the query. <code>SESSION_USER()</code> is evaluated for the caller, not for the view's author. For Dan, it returns Dan's tree; for a service account, nothing, unless someone gave it access rows.",
+  14: "<code>)</code> closes the <code>IN (</code>; <code>;</code> ends the statement."
+});
+
+YamlExplain.mount(document.getElementById("yx-who"), `
+-- What can dan@acme.com see, and why?
+SELECT employee_id, STRING_AGG(access_reason, ', ') AS reasons
+FROM \`acme-dw.security.access\`
+WHERE gcpUser = 'dan@acme.com'
+GROUP BY employee_id
+ORDER BY employee_id;
+
+-- Who can see Lia (E13), and why?
+SELECT gcpUser, STRING_AGG(access_reason, ', ') AS reasons
+FROM \`acme-dw.security.access\`
+WHERE employee_id = 'E13'
+GROUP BY gcpUser;
+`, {
+  1: "A comment: <code>--</code> to end of line. The first query lists one person's visible employees.",
+  2: "<code>SELECT employee_id</code>: one output row per visible employee. <code>STRING_AGG(access_reason, ', ')</code> joins all the reasons for that employee into one string, like <code>'MANAGER_TREE, HRBP_TREE'</code>. <code>AS reasons</code> names it. Two reasons = a duplicate in any view that JOINs.",
+  3: "Reads the access table directly. You need read access to it; employees don't have it, People Analytics does.",
+  4: "<code>WHERE gcpUser = 'dan@acme.com'</code>: the same comparison the view makes, with a literal email in place of <code>SESSION_USER()</code>. That's why the answer matches what Dan gets.",
+  5: "<code>GROUP BY employee_id</code>: one row per employee, so <code>STRING_AGG</code> collects that employee's reasons.",
+  6: "<code>ORDER BY employee_id</code>: sorted by ID. <code>;</code> ends the statement.",
+  8: "The second query reverses the question: who can see one employee.",
+  9: "<code>SELECT gcpUser</code>: one row per viewer, with their reasons for seeing this employee.",
+  10: "The same access table.",
+  11: "<code>WHERE employee_id = 'E13'</code>: only Lia's access rows.",
+  12: "<code>GROUP BY gcpUser</code>: one row per viewer. <code>;</code> ends it. Add the people who read <code>hr</code> directly (IAM) for the complete list."
+});
+
+YamlExplain.mount(document.getElementById("yx-turns"), `
+CREATE ROW ACCESS POLICY maintainers_all
+ON \`acme-dw.agent.turns\`
+GRANT TO ('group:people-analytics@acme.com',
+          'serviceAccount:people-agent@people-agent-prod.iam.gserviceaccount.com')
+FILTER USING (TRUE);
+
+CREATE ROW ACCESS POLICY own_turns
+ON \`acme-dw.agent.turns\`
+GRANT TO ('group:all-employees@acme.com')
+FILTER USING (gcpUser = SESSION_USER());
+`, {
+  1: "<code>CREATE ROW ACCESS POLICY</code> attaches a named filter to one table; <code>maintainers_all</code> is its name. Needs BigQuery Admin or Data Owner. Create this one <em>first</em>: the moment a table has any policy, everyone not granted by one sees zero rows.",
+  2: "<code>ON</code> names the protected table, as <code>project.dataset.table</code>.",
+  3: "<code>GRANT TO (…)</code>: who this policy applies to. <code>'group:people-analytics@acme.com'</code> is the People Analytics team's Google group. Every identity listed must exist, or the statement fails.",
+  4: "<code>'serviceAccount:…'</code>: the agent's service account (placeholder name; use the real one), so it can still read the table for maintenance. The <code>)</code> closes the list.",
+  5: "<code>FILTER USING (TRUE)</code>: the filter works like a <code>WHERE</code> clause, and <code>TRUE</code> passes every row. <code>;</code> ends the statement.",
+  7: "A second policy on the same table. A person granted by several policies sees every row any of them lets through.",
+  8: "The same table.",
+  9: "Granted to all employees. They still need ordinary read access to the table; a policy never grants that.",
+  10: "<code>FILTER USING (gcpUser = SESSION_USER())</code>: keep a turn only if its <code>gcpUser</code> column is the caller's email. A direct comparison, no lookup table needed. <code>;</code> ends the statement."
+});
+
+YamlExplain.mount(document.getElementById("yx-me"), `
+SELECT SESSION_USER() AS me;
+`, {
+  1: "<code>SELECT</code> without <code>FROM</code> reads no table. <code>SESSION_USER()</code> returns the email of the identity running the query: yours here, the employee's when the agent runs it as them. <code>AS me</code> names the column. <code>;</code> ends the statement."
+});
+
+SpotLine.mount(document.getElementById("spot"), `
+CREATE OR REPLACE VIEW \`acme-dw.hr_views.my_people\` AS
+SELECT e.*
+FROM \`acme-dw.hr.employee_snapshot\` AS e
+JOIN \`acme-dw.security.access\` AS a
+  ON a.employee_id = e.employee_id
+WHERE e.snapshot_date = (SELECT MAX(snapshot_date) FROM \`acme-dw.hr.employee_snapshot\`)
+  AND a.gcpUser = SESSION_USER()
+  OR a.access_reason = 'PEOPLE_ANALYTICS'
+`, {
+  tasks: [
+    { q: "Noa, a regular employee, sees <b>every employee</b>, each one several times.", answer: 8,
+      fix: "<code>AND</code> binds tighter than <code>OR</code>, so this reads \"(today AND mine) OR <em>anyone's</em> People Analytics row\". Every PA member's access rows let everyone in, on every date. Delete the line: PA members already have their own <code>PEOPLE_ANALYTICS</code> rows, which <code>gcpUser = SESSION_USER()</code> covers." },
+    { q: "Yael, who is on People Analytics and manages Gil, sees <b>herself and Gil twice</b>.", answer: 4,
+      fix: "The JOIN returns a row per matching access row, and Yael has two for each of them. Replace the JOIN with <code>WHERE e.employee_id IN (SELECT employee_id FROM access WHERE gcpUser = SESSION_USER())</code>." },
+    { q: "Managers can now see <b>base_salary</b> and <b>performance_rating</b>, which the customer said this view must never show.", answer: 2,
+      fix: "<code>e.*</code> exposes every column of the snapshot, including the sensitive ones. List the columns the view should show." },
+    { q: "Rows are right now. But every dashboard refresh scans <b>all three years</b> of snapshots.", answer: 6,
+      fix: "A value from a subquery can't prune (Lesson 1). Expose <code>snapshot_date</code> and let callers send a literal date, or filter <code>e.snapshot_date &gt;= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)</code>." }
+  ],
+  notes: {
+    1: "Creates or replaces the view <code>my_people</code> in the authorized dataset <code>hr_views</code>. Replacing it keeps it readable to <code>hr</code>: every view in an authorized dataset is.",
+    2: "<code>SELECT e.*</code>: every column of the snapshot table, sensitive ones included.",
+    3: "The daily HR snapshot, aliased <code>e</code>.",
+    4: "<code>JOIN</code> the access table, aliased <code>a</code>: one output row for each (employee, matching access row) pair.",
+    5: "<code>ON a.employee_id = e.employee_id</code>: pairs an employee with every access row about them, for every viewer. The next lines narrow it down.",
+    6: "<code>WHERE e.snapshot_date = (SELECT MAX(…))</code>: only the latest snapshot. Correct rows, but a subquery value can't prune partitions, so every partition is read.",
+    7: "<code>AND a.gcpUser = SESSION_USER()</code>: only access rows whose viewer is the caller. This is the line that makes the view personal.",
+    8: "<code>OR a.access_reason = 'PEOPLE_ANALYTICS'</code>: also any access row with that reason, whoever its viewer is. Meant as \"PA sees all\"."
+  }
+});
+</script>
+</body>
+</html>

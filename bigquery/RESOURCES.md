@@ -25,7 +25,21 @@ Google moved the docs to `docs.cloud.google.com`; old `cloud.google.com/bigquery
 - [Sample: dry run in Python](https://docs.cloud.google.com/bigquery/docs/samples/bigquery-query-dry-run)
   `QueryJobConfig(dry_run=True, use_query_cache=False)`. Use for: app-side cost guards.
 - [Docs: Introduction to row-level security](https://docs.cloud.google.com/bigquery/docs/row-level-security-intro)
-  Row access policies, grantee lists, `SESSION_USER()`, no matching policy means no rows. Use for: Lesson 2.
+  Row access policies, grantee lists, `SESSION_USER()`, no matching policy means no rows, what drops policies, limitations, comparison with authorized views and separate tables. Primary source for Lesson 2.
+- [Docs: Use row-level security](https://docs.cloud.google.com/bigquery/docs/managing-row-level-security)
+  `CREATE ROW ACCESS POLICY` syntax and examples (service account, workforce identity, lookup-table subquery), DROP rules, listing, permissions. Use for: writing policies.
+- [Docs: Best practices for row-level security](https://docs.cloud.google.com/bigquery/docs/best-practices-row-level-security)
+  Side channels, hidden stats, no write access for filtered users, no pruning on policy filters, the two-policy pattern. Use for: answering the customer's security team.
+- [Docs: Authorized views](https://docs.cloud.google.com/bigquery/docs/authorized-views)
+  Separate dataset, authorize the view on the source, same region, authorized datasets. Use for: sharing row and column subsets.
+- [Docs: Authorized datasets](https://docs.cloud.google.com/bigquery/docs/authorized-datasets)
+  "All current and future views in an authorized dataset have access to the tables in the shared dataset"; permissions to create views there; 2,500 authorized resources limit. Use for: the customer's `hr_views` design.
+- [Docs: Cached query results](https://docs.cloud.google.com/bigquery/docs/cached-results)
+  Not cached: non-deterministic functions incl. `SESSION_USER()`, row-level-secured tables, destination tables; cache is per user, per project. Use for: why secured dashboards cost on every refresh.
+- [Docs: Security functions (SESSION_USER)](https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/security_functions)
+  "Returns the email address of the user that's running the query." Use for: the one-service-account trap.
+- [DoiT: Multi-tenant security in BigQuery via your BI tool](https://www.doit.com/blog/implementing-multi-tenant-security-transparently-and-effectively-in-bigquery-via-your-preferred-bi)
+  Practitioner article: group- and domain-based policies, user OAuth instead of one shared service account, policy-count limits at 100+ customers. Use for: multi-tenant app design (not official).
 
 ## Wisdom (Communities)
 
@@ -38,4 +52,5 @@ Google moved the docs to `docs.cloud.google.com`; old `cloud.google.com/bigquery
 
 ## Gaps
 
-- No trusted single source yet for multi-tenant row-level security patterns in apps that use one service account. Look before Lesson 2.
+- Still no official Google page on per-user row security for apps that use one service account (DoiT article is the best so far). Google's multi-tenant best-practices page URL 404'd on 2026-10-25; find its new home before Lesson 3.
+- Which BI tools pass the viewer's identity to BigQuery (Looker Studio viewer credentials, Tableau OAuth). Look before Lesson 8.

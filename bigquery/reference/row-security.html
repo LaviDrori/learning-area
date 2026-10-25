@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Row Security Cheat Sheet</title>
+<link rel="stylesheet" href="../assets/course.css">
+<style> pre .c { color: var(--muted); } </style>
+</head>
+<body><main>
+<div class="crumbs">Lessons: <a href="../lessons/0001-what-a-query-is-billed-for.html">1</a> · <a href="../lessons/0002-each-user-sees-only-their-rows.html">2</a> · Reference: <a href="glossary.html">Glossary</a> · <a href="query-cost.html">Query cost</a></div>
+<h1>Row Security</h1>
+<p class="subtitle">Who sees which HR rows. Sources: <a href="https://docs.cloud.google.com/bigquery/docs/authorized-views">Authorized views</a> · <a href="https://docs.cloud.google.com/bigquery/docs/authorized-datasets">Authorized datasets</a> · <a href="https://docs.cloud.google.com/bigquery/docs/row-level-security-intro">Row-level security intro</a> · <a href="https://docs.cloud.google.com/bigquery/docs/managing-row-level-security">Use row-level security</a> · <a href="https://docs.cloud.google.com/bigquery/docs/best-practices-row-level-security">Best practices</a>.</p>
+
+<h2>The setup</h2>
+<ul>
+  <li><code>security.access (gcpUser, employee_id, access_reason)</code>: one row per viewer × visible employee × reason (<code>SELF</code>, <code>MANAGER_TREE</code>, <code>HRBP_TREE</code>, <code>PEOPLE_ANALYTICS</code>).</li>
+  <li>Views in <code>hr_views</code> (an <b>authorized dataset</b>) read <code>hr</code> + <code>security</code>; employees read only <code>hr_views</code>.</li>
+  <li><code>SESSION_USER()</code> = email of whoever's credentials sent the job (agent as user ✓; owner-credential dashboard, scheduled query, service account ✗).</li>
+</ul>
+
+<h2>The view</h2>
+<pre>CREATE OR REPLACE VIEW `acme-dw.hr_views.my_people` AS
+SELECT e.snapshot_date, e.employee_id, e.full_name,       <span class="c">-- name columns: never e.*, no salary</span>
+       e.department, e.manager_id, e.job_level
+FROM `acme-dw.hr.employee_snapshot` AS e
+WHERE e.employee_id IN (                                  <span class="c">-- IN, not JOIN: no duplicates</span>
+  SELECT employee_id FROM `acme-dw.security.access`
+  WHERE gcpUser = SESSION_USER());                        <span class="c">-- caller, not view author</span></pre>
+<p>Callers filter <code>snapshot_date</code> with a literal date (prunes through the view). No <code>OR</code> next to the <code>SESSION_USER()</code> condition.</p>
+
+<h2>"Which data can X see?"</h2>
+<pre>SELECT employee_id, STRING_AGG(access_reason, ', ') AS reasons   <span class="c">-- 2+ reasons = JOIN duplicate</span>
+FROM `acme-dw.security.access` WHERE gcpUser = 'dan@acme.com'
+GROUP BY employee_id;
+
+SELECT gcpUser, STRING_AGG(access_reason, ', ') AS reasons       <span class="c">-- who can see E13</span>
+FROM `acme-dw.security.access` WHERE employee_id = 'E13'
+GROUP BY gcpUser;</pre>
+<p>Plus everyone with direct read on <code>hr</code> (IAM): they bypass the views.</p>
+
+<h2>Outcomes</h2>
+<table>
+<tr><th>Situation</th><th>Result</th></tr>
+<tr><td>can't read <code>hr_views</code></td><td>Access Denied</td></tr>
+<tr><td>can read, no access rows (new hire before rebuild)</td><td>zero rows, no error</td></tr>
+<tr><td>several reasons for one employee, view uses JOIN</td><td>duplicates</td></tr>
+<tr><td>query uses <code>SESSION_USER()</code> or a row-secured table</td><td>never cached: every refresh billed</td></tr>
+</table>
+
+<h2>Leaks to check</h2>
+<ul>
+  <li>"All current and future views" in an authorized dataset can read the source: an unfiltered debug view leaks to every reader. Drafts elsewhere.</li>
+  <li>Who can create/update views in <code>hr_views</code> decides everyone's filter.</li>
+  <li>Copies lose the filter: agent turns, exports, extracts, scheduled-query outputs.</li>
+  <li>Stale access table after re-orgs: old manager keeps access until the rebuild.</li>
+  <li>Side channels (crafted queries, durations): views are "recommended for flexibility", separate tables "for security".</li>
+</ul>
+
+<h2>Row access policies (for tables people read directly)</h2>
+<pre>CREATE ROW ACCESS POLICY maintainers_all ON `acme-dw.agent.turns`      <span class="c">-- create first</span>
+GRANT TO ('group:people-analytics@acme.com', 'serviceAccount:…')       <span class="c">-- user: group: serviceAccount: domain:</span>
+FILTER USING (TRUE);                                                   <span class="c">-- all rows</span>
+
+CREATE ROW ACCESS POLICY own_turns ON `acme-dw.agent.turns`
+GRANT TO ('group:all-employees@acme.com')
+FILTER USING (gcpUser = SESSION_USER());                               <span class="c">-- like a WHERE clause</span></pre>
+<ul>
+  <li>Needs table read first → policies → none granted = zero rows → several = union.</li>
+  <li><b>Dropped by</b> <code>CREATE OR REPLACE TABLE</code>, <code>WRITE_TRUNCATE</code>, <code>bq load --replace</code>. <b>Kept by</b> <code>TRUNCATE TABLE</code>, appends, DML.</li>
+  <li>Filters don't prune; dry run shows 0 bytes; <code>total_bytes_billed</code> empty in <code>INFORMATION_SCHEMA.JOBS</code>.</li>
+  <li>List: console <b>View row access policies</b> or <code>bq ls --row_access_policies project:dataset.table</code>. Remove the last one with <code>DROP ALL ROW ACCESS POLICIES ON …</code>.</li>
+  <li>Filtered users get no write access. Never grant <code>bigquery.filteredDataViewer</code> via IAM.</li>
+</ul>
+</main></body>
+</html>
