@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Who Can Do What</title>
+<link rel="stylesheet" href="../assets/course.css">
+<style>
+  .story { border-left: 3px solid var(--rule); padding-left: 1rem; margin: 1rem 0; }
+  .flow svg text { font-family: var(--mono); font-size: 11px; fill: var(--fg); }
+  .flow svg .muted { fill: var(--muted); }
+  .flow svg .acc { fill: var(--accent); }
+  .flow svg .badt { fill: var(--bad); }
+  .flow svg .box { fill: var(--panel); stroke: var(--rule); }
+  .flow svg .arrow { stroke: var(--muted); stroke-width: 1.2; fill: none; marker-end: url(#ah); }
+  .flow svg .bad { stroke: var(--bad); stroke-dasharray: 4 3; fill: none; }
+  pre.tree { line-height: 1.45; }
+  pre.tree .c { color: var(--muted); }
+</style>
+</head>
+<body><main>
+<div class="crumbs">BigQuery · Lesson 3 · <a href="0002-each-user-sees-only-their-rows.html">← Lesson 2</a> · <a href="../reference/glossary.html">Glossary</a> · <a href="../reference/iam-and-billing.html">IAM &amp; billing cheat sheet</a></div>
+
+<h1>Who Can Do What</h1>
+<p class="subtitle">IAM roles, where a grant lives, service accounts, and which project pays. ~25 minutes.</p>
+
+<div class="goal"><strong>Your win today:</strong> for any person or service account and any action (ask the agent, query <code>hr</code> directly, write a turn, create a view), say whether BigQuery allows it, <em>which grant</em> allows it, and <em>which project pays</em>. Then give HR the complete answer to "who can see Lia?": the access table from Lesson 2 <em>plus</em> everyone IAM lets past the views.</div>
+
+<h2>0. Predict first <span class="score"></span></h2>
+<p>Guess even if you're unsure.</p>
+<div class="quiz" data-answer="2">
+  <p class="q">So employees can "use the views", someone grants <code>all-employees@</code> BigQuery Data Viewer on the whole <code>acme-dw</code> project instead of on <code>hr_views</code>. Noa, who can run queries in some project, runs <code>SELECT * FROM acme-dw.hr.employee_snapshot</code>. She gets…</p>
+  <button>her own row, via the access table filter</button>
+  <button>Access Denied, as hr was never shared directly</button>
+  <button>every row, since the grant covers hr too</button>
+  <p class="why">A grant on a project flows down to every dataset and table in it. <code>hr</code> is in <code>acme-dw</code>, so Noa can read it, and no view stands in the way. The access table only filters what comes <em>through the views</em>. Section 2.</p>
+</div>
+<div class="quiz" data-answer="1">
+  <p class="q">The agent sends Noa's question as Noa, with the job's project set to <code>people-agent-prod</code>. The HR tables live in <code>acme-dw</code>. Which project's bill shows the query?</p>
+  <button>acme-dw, which stores the HR tables read</button>
+  <button>people-agent-prod, the project where the job ran</button>
+  <button>split evenly between the two projects used</button>
+  <p class="why">"The querying project is billed for the query job," while "the project storing the data is billed for the amount of data stored." Section 1.</p>
+</div>
+
+<h2>1. Three questions before any HR row comes back</h2>
+<p>Every query passes three checks. The first two are IAM, this lesson. The third is Lesson 2.</p>
+<figure class="flow">
+<svg viewBox="0 0 640 190" role="img" aria-label="Check 1: may you run a job in this project? Needs bigquery.jobs.create on the job's project, which is the project that pays. Failing gives Access Denied. Check 2: may you read every table and view the query names? Needs bigquery.tables.getData. Failing gives Access Denied. Check 3: which rows? The view's filter or row access policies. Failing gives zero rows and no error.">
+  <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor" class="muted"/></marker></defs>
+  <rect class="box" x="10" y="20" width="190" height="70" rx="4"/>
+  <text x="105" y="42" text-anchor="middle">1 · run a job here?</text>
+  <text x="105" y="60" text-anchor="middle" class="acc">bigquery.jobs.create</text>
+  <text x="105" y="77" text-anchor="middle" class="muted">on the job's project</text>
+  <rect class="box" x="225" y="20" width="190" height="70" rx="4"/>
+  <text x="320" y="42" text-anchor="middle">2 · read what's named?</text>
+  <text x="320" y="60" text-anchor="middle" class="acc">bigquery.tables.getData</text>
+  <text x="320" y="77" text-anchor="middle" class="muted">on each table or view</text>
+  <rect class="box" x="440" y="20" width="190" height="70" rx="4"/>
+  <text x="535" y="42" text-anchor="middle">3 · which rows?</text>
+  <text x="535" y="60" text-anchor="middle" class="acc">SESSION_USER() filter</text>
+  <text x="535" y="77" text-anchor="middle" class="muted">view or row policy (L2)</text>
+  <path class="arrow" d="M200,55 L223,55"/><path class="arrow" d="M415,55 L438,55"/>
+  <path class="bad" d="M105,90 L105,112"/><path class="bad" d="M320,90 L320,112"/><path class="bad" d="M535,90 L535,112"/>
+  <text x="105" y="128" text-anchor="middle" class="badt">✗ Access Denied</text>
+  <text x="320" y="128" text-anchor="middle" class="badt">✗ Access Denied</text>
+  <text x="535" y="128" text-anchor="middle" class="badt">✗ zero rows, no error</text>
+  <text x="105" y="165" text-anchor="middle" class="acc">this project pays</text>
+  <text x="320" y="165" text-anchor="middle" class="muted">authorized view: the</text>
+  <text x="320" y="180" text-anchor="middle" class="muted">source isn't checked for you</text>
+</svg>
+<figcaption>Two IAM gates, then the row filter. An error means a gate; an empty result means the filter.</figcaption>
+</figure>
+<ul>
+  <li><b>Gate 1, the job.</b> A query is a job, and a job runs in one project. You need <code>bigquery.jobs.create</code> "on the project from which the query is being run, regardless of where the data is stored." The role that carries it is <b>BigQuery Job User</b>, which "can only be granted on" projects, folders and organizations.<span class="note"><a href="https://docs.cloud.google.com/bigquery/docs/running-queries">Run a query</a> · <a href="https://docs.cloud.google.com/bigquery/docs/access-control">BigQuery IAM roles</a></span></li>
+  <li><b>That project pays.</b> "The querying project is billed for the query job." The job ID shows it: in <code>&lt;project_id&gt;:&lt;region&gt;.&lt;job_id&gt;</code>, the project is the one billed. Storage is billed to the project that holds the data.<span class="note"><a href="https://docs.cloud.google.com/bigquery/docs/managing-jobs">Manage jobs</a></span></li>
+  <li><b>Gate 2, the data.</b> You need <code>bigquery.tables.getData</code> "on all tables and views that your query references", carried by <b>BigQuery Data Viewer</b>. A normal view needs it on the tables underneath too; with an authorized view or dataset "you don't need access to the underlying source data." That's why employees only need Data Viewer on <code>hr_views</code>.<span class="note"><a href="https://docs.cloud.google.com/bigquery/docs/running-queries">Run a query</a></span></li>
+</ul>
+
+<h2>2. Where a grant lives, and where it reaches</h2>
+<p>A grant (Google calls it a role binding in an <b>allow policy</b>) is three things: a <b>role</b>, a <b>member</b> (<code>user:</code>, <code>group:</code>, <code>serviceAccount:</code>) and the <b>resource</b> it's set on. Resources nest:</p>
+<pre class="tree">organization acme.com              <span class="c">(if the customer has one; maybe folders below)</span>
+├─ project acme-dw                 <span class="c">the customer's data; storage billed here</span>
+│  ├─ dataset hr                   <span class="c">base HR tables</span>
+│  │  └─ table employee_snapshot
+│  ├─ dataset security             <span class="c">the access table</span>
+│  ├─ dataset hr_views             <span class="c">the authorized dataset</span>
+│  └─ dataset agent
+│     └─ table turns
+└─ project people-agent-prod       <span class="c">the agent; its query jobs run and are billed here</span>
+   └─ service account people-agent</pre>
+<ul>
+  <li><b>Grants flow down.</b> "Resources inherit the allow policies of the parent resource." A grant on <code>acme-dw</code> reaches every dataset and table in it, including <code>hr</code>.<span class="note"><a href="https://docs.cloud.google.com/iam/docs/resource-hierarchy-access-control">IAM: resource hierarchy</a></span></li>
+  <li><b>They only add.</b> The effective policy is "the union of the allow policy set at that resource" and "the allow policy inherited from its parent." Nothing you set on <code>hr</code> takes back a project-level grant. To find who can read <code>hr</code>, you look at <code>hr</code> <em>and every level above it</em>.</li>
+  <li><b>Basic roles are wide.</b> Project Owner, Editor and Viewer get <code>OWNER</code>, <code>WRITER</code> and <code>READER</code> on datasets created in the project by default. Google: "Avoid using basic roles. They predate IAM and grant excessive and uneven access."<span class="note"><a href="https://docs.cloud.google.com/bigquery/docs/access-control-basic-roles">Basic roles</a></span></li>
+</ul>
+<table>
+<tr><th>Role</th><th>Lets you</th><th>Lowest level</th></tr>
+<tr><td><b>Job User</b> <code>roles/bigquery.jobUser</code></td><td>run jobs (queries, loads) in the project; see and cancel your own jobs</td><td>project</td></tr>
+<tr><td><b>Data Viewer</b> <code>roles/bigquery.dataViewer</code></td><td>read table and view data: query, export, replicate, snapshot</td><td>table / view</td></tr>
+<tr><td><b>Data Editor</b> <code>roles/bigquery.dataEditor</code></td><td>Data Viewer + create, update and delete tables and views, write rows</td><td>table / view</td></tr>
+<tr><td><b>Data Owner</b> <code>roles/bigquery.dataOwner</code></td><td>everything on the dataset and its contents, including who may access it</td><td>table / view</td></tr>
+<tr><td><b>BigQuery Admin</b> <code>roles/bigquery.admin</code></td><td>"manage all resources within the project", all data, all users' jobs</td><td>project (in practice)</td></tr>
+<tr><td><b>Service Account Token Creator</b> <code>roles/iam.serviceAccountTokenCreator</code></td><td>act as that service account: "gain the service account's permissions"</td><td>service account</td></tr>
+</table>
+<p class="note" style="float:none;width:auto;margin:0">Sources: <a href="https://docs.cloud.google.com/bigquery/docs/access-control">BigQuery IAM roles</a> · <a href="https://docs.cloud.google.com/iam/docs/service-account-impersonation">Service account impersonation</a></p>
+
+<h2>3. The customer's grants, line by line</h2>
+<p>A clean version of the setup, gathered into one list. In the console these are spread over each project's <b>IAM</b> page, each dataset's <b>Sharing › Permissions</b>, and the service account's <b>Permissions</b> tab. Click each line marked ●.</p>
+<div id="yx-grants"></div>
+
+<h2>4. Try it: allowed, and through which grant?</h2>
+<p>The grants above, plus one tempting change. Things to try:</p>
+<ol>
+  <li>Noa: <b>ask the agent</b>, then <b>query <code>hr_views</code> in the console</b>. Why does one work and not the other?</li>
+  <li>Tom from the data platform team: <b>query <code>hr</code> directly</b>. Look for "(inherited)".</li>
+  <li>Switch to <b>"+ project-level Data Viewer"</b> and try both of Noa's direct queries on <code>hr</code>. Which gate still stops one of them, and why doesn't that help?</li>
+  <li>The agent's service account: <b>ask the agent</b>. What would break if the agent stopped querying as the user?</li>
+</ol>
+<div id="iam"></div>
+
+<h2>5. Spot the line</h2>
+<p>A teammate's draft of the grants for the new agent setup. Each symptom showed up in testing. Click the guilty line.</p>
+<div id="spot"></div>
+
+<h2>6. The complete answer to "who can see Lia?"</h2>
+<p>HR asks this about a sensitive employee. Lesson 2 answered half of it. The full list has three parts:</p>
+<ol>
+  <li><b>Through the views:</b> the access table, <code>WHERE employee_id = 'E13'</code> (Lesson 2, section 3).</li>
+  <li><b>Past the views:</b> everyone with <code>bigquery.tables.getData</code> on <code>hr.employee_snapshot</code>, from a grant on the table, the <code>hr</code> dataset, the <code>acme-dw</code> project, or a folder or organization above it. The query below lists the first two. It only shows "bindings that are explicitly set" on the object you name, not inherited ones, so add the project's IAM page (BigQuery Admin, Data Viewer/Editor/Owner, basic roles) and ask the customer's org admins about folder and organization grants.<span class="note"><a href="https://docs.cloud.google.com/bigquery/docs/information-schema-object-privileges">OBJECT_PRIVILEGES view</a></span></li>
+  <li><b>Side doors:</b> anyone who can act as an identity from part 2 (Token Creator on a service account that reads <code>hr</code>), and anyone with <code>bigquery.jobs.listAll</code> on the agent's project, who sees the "full (unredacted) details for all jobs", including the SQL the agent wrote for each employee.<span class="note"><a href="https://docs.cloud.google.com/bigquery/docs/managing-jobs">Manage jobs</a></span></li>
+</ol>
+<div id="yx-priv"></div>
+
+<div class="story">
+<h3>Story: "the agent costs us money, why is it on our bill?"</h3>
+<p>The customer's finance team sees BigQuery charges on <code>people-agent-prod</code> and none for the agent on <code>acme-dw</code>. That's the design: the agent creates every job in <code>people-agent-prod</code>, so that project pays for the queries, while <code>acme-dw</code> keeps paying for storage. It also means every employee needs Job User on <code>people-agent-prod</code>, and none on <code>acme-dw</code>. Want the costs per team instead? Then the jobs would have to run in per-team projects; Google's multi-tenant guide describes such "compute tier" projects.<span class="note"><a href="https://docs.cloud.google.com/bigquery/docs/best-practices-for-multi-tenant-workloads-on-bigquery">Multi-tenant workloads</a></span> And recall Lesson 2: <code>SESSION_USER()</code> queries are never cached, so each agent question is billed in full.</p>
+</div>
+
+<hr>
+<h2>7. A customer asks… <span class="score"></span></h2>
+<div class="quiz" data-answer="0">
+  <p class="q">Someone gave Noa Data Viewer on the <code>acme-dw</code> project. HR asks: can a grant on the <code>hr</code> dataset take that access away?</p>
+  <button>no, access is the union of all grants</button>
+  <button>yes, the dataset's own policy wins over it</button>
+  <button>only if the dataset grant is made later</button>
+  <p class="why">Allow policies only add: the effective policy is the union of the resource's own and every parent's. Remove the project grant itself.</p>
+</div>
+<div class="quiz" data-answer="2">
+  <p class="q">Bob, a contractor with Data Viewer on <code>hr_views</code>, opens the console in <code>acme-dw</code> and gets <code>Access Denied: … bigquery.jobs.create</code>. What's missing?</p>
+  <button>Data Viewer on the source hr dataset too</button>
+  <button>a row for him in the access table</button>
+  <button>Job User in the project running the query</button>
+  <p class="why">The error names the permission: he may read the view but not run a job in <code>acme-dw</code>. The source isn't checked for an authorized view, and the access table only filters rows after both gates.</p>
+</div>
+<div class="quiz" data-answer="0">
+  <p class="q">The agent's service account appends turns to <code>agent.turns</code>. The least-privilege data grant for that is…</p>
+  <button>Data Editor on the agent dataset only</button>
+  <button>Data Editor on the whole acme-dw project</button>
+  <button>BigQuery Admin, so it never hits errors</button>
+  <p class="why">On the project it could rewrite <code>hr</code> too. Google: create "single-purpose service accounts" and "limit its privileges to reduce the potential harm".<span class="note"><a href="https://docs.cloud.google.com/iam/docs/best-practices-service-accounts">Service account best practices</a></span></p>
+</div>
+<div class="quiz" data-answer="2">
+  <p class="q">Security wants everyone who can read <code>hr.employee_snapshot</code>. You run <code>OBJECT_PRIVILEGES</code> on the table and on the <code>hr</code> dataset. What's still missing?</p>
+  <button>people in the access table with SELF rows</button>
+  <button>nothing, since that view lists inherited grants too</button>
+  <button>grants made on the project, folder or org</button>
+  <p class="why"><code>OBJECT_PRIVILEGES</code> shows only grants set on the object you name. Inherited ones live on the project's IAM page and above. Access-table rows only matter through the views.</p>
+</div>
+<div class="quiz" data-answer="1">
+  <p class="q">A vendor's support group has Service Account Token Creator on <code>people-agent</code>. What can they read?</p>
+  <button>nothing, as the role has no BigQuery permissions</button>
+  <button>everything that the agent's service account can read</button>
+  <button>only the service account's own settings and keys</button>
+  <p class="why">Impersonating a service account means acting as it, "to gain the service account's permissions". That includes the <code>maintainers_all</code> policy on <code>agent.turns</code>: every employee's questions and answers.</p>
+</div>
+
+<hr>
+<div class="callout source"><b>Primary source, read this next (~15 min):</b> the "Required permissions" part of <a href="https://docs.cloud.google.com/bigquery/docs/running-queries">Run a query</a> (the two gates), then <a href="https://docs.cloud.google.com/iam/docs/resource-hierarchy-access-control">IAM: using resource hierarchy for access control</a> (inheritance), then skim the role list in <a href="https://docs.cloud.google.com/bigquery/docs/access-control">BigQuery IAM roles and permissions</a>.</div>
+<div class="callout ask"><b>Questions? Ask me.</b> For example: <em>"should employees get Job User on the agent project or on a separate one?"</em>, <em>"how do I list folder and organization grants?"</em>, or <em>"what does the agent need to write turns with the Storage Write API?"</em></div>
+
+<hr>
+<h2>Appendix: on your next office day (Tue/Wed, ~10 min)</h2>
+<p>On your work account. Use the customer's real names; you may lack permission for some steps, which is itself an answer.</p>
+<ol>
+  <li><b>Who pays for the agent?</b> Open <b>Personal history</b> (or <b>Project history</b>) in the BigQuery console and find a query the agent ran for you. The project before the colon in its job ID is the one billed.</li>
+  <li><b>Who reads HR past the views?</b> Run the <code>OBJECT_PRIVILEGES</code> queries from section 6 on the real HR dataset and table (fix the region). Then open the data project's <b>IAM</b> page and note every BigQuery Admin, Data Viewer/Editor/Owner and basic role.</li>
+  <li><b>Who can act as the agent?</b> Open the agent's service account in <b>IAM &amp; Admin › Service accounts › Permissions</b>. Note who has Token Creator or Service Account User.</li>
+</ol>
+<p><b>Expected:</b> one project name from step 1, and two short lists. Anyone on them who isn't a platform admin or the People Analytics team is a question for the customer.</p>
+
+<div class="next" id="next"><span>BigQuery · Lesson 3</span><span>Next: nested data: STRUCT, ARRAY and UNNEST →</span></div>
+</main>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/yaml-explain.js"></script>
+<script src="../assets/spot-line.js"></script>
+<script src="../assets/iam-sim.js"></script>
+<script>
+const SA = "serviceAccount:people-agent@people-agent-prod.iam.gserviceaccount.com";
+const EMP = "group:all-employees@acme.com", PA = "group:people-analytics@acme.com", PLAT = "group:data-platform@acme.com";
+const READ = "bigquery.tables.getData", JOB = "bigquery.jobs.create";
+const CLEAN = [
+  { role: "roles/bigquery.admin", member: PLAT, on: "acme-dw" },
+  { role: "roles/bigquery.jobUser", member: PA, on: "acme-dw" },
+  { role: "roles/bigquery.dataViewer", member: PA, on: "acme-dw/hr" },
+  { role: "roles/bigquery.dataViewer", member: PA, on: "acme-dw/security" },
+  { role: "roles/bigquery.dataViewer", member: EMP, on: "acme-dw/hr_views" },
+  { role: "roles/bigquery.dataEditor", member: PA, on: "acme-dw/hr_views" },
+  { role: "roles/bigquery.dataEditor", member: SA, on: "acme-dw/agent" },
+  { role: "roles/bigquery.dataViewer", member: EMP, on: "acme-dw/agent/turns" },
+  { role: "roles/bigquery.admin", member: PLAT, on: "people-agent-prod" },
+  { role: "roles/bigquery.jobUser", member: EMP, on: "people-agent-prod" },
+  { role: "roles/bigquery.jobUser", member: SA, on: "people-agent-prod" },
+  { role: "roles/iam.serviceAccountTokenCreator", member: PLAT, on: "people-agent-prod/sa:people-agent" }
+];
+
+IamSim.mount(document.getElementById("iam"), {
+  roles: {   // only the permissions this lesson uses
+    "roles/bigquery.jobUser": [JOB],
+    "roles/bigquery.dataViewer": [READ],
+    "roles/bigquery.dataEditor": [READ, "bigquery.tables.create", "bigquery.tables.updateData"],
+    "roles/bigquery.admin": [JOB, READ, "bigquery.tables.create", "bigquery.tables.updateData", "bigquery.jobs.listAll"],
+    "roles/iam.serviceAccountTokenCreator": ["iam.serviceAccounts.getAccessToken"]
+  },
+  setups: [
+    { label: "clean (section 3)", bindings: CLEAN },
+    { label: "+ project-level Data Viewer for all employees", bindings: [...CLEAN, { role: "roles/bigquery.dataViewer", member: EMP, on: "acme-dw" }],
+      note: "One extra grant on <code>acme-dw</code>, meant to \"let people see the views\". It reaches <code>hr</code>, <code>security</code> and <code>agent</code> too." }
+  ],
+  people: [
+    { label: "Noa, employee", members: ["user:noa@acme.com", EMP] },
+    { label: "Gil, People Analytics", members: ["user:gil@acme.com", EMP, PA] },
+    { label: "Tom, data platform team", members: ["user:tom@acme.com", EMP, PLAT] },
+    { label: "the agent's service account", members: [SA],
+      note: "The agent queries <em>as the employee</em>, so this identity never needs the views. If it queried as itself it would need Data Viewer on <code>hr_views</code>, and <code>SESSION_USER()</code> would be the service account: zero rows (Lesson 2)." },
+    { label: "Bob, contractor (no groups)", members: ["user:bob@acme.com"] }
+  ],
+  actions: [
+    { label: "ask the agent (job in people-agent-prod, reads hr_views.my_people)",
+      needs: [{ perm: JOB, on: "people-agent-prod" }, { perm: READ, on: "acme-dw/hr_views/my_people" }],
+      note: "<code>hr_views</code> is an authorized dataset, so <code>hr</code> and <code>security</code> aren't checked for the caller. If both gates pass, the view's <code>SESSION_USER()</code> filter decides the rows." },
+    { label: "query hr_views.my_people in the console (job in acme-dw)",
+      needs: [{ perm: JOB, on: "acme-dw" }, { perm: READ, on: "acme-dw/hr_views/my_people" }] },
+    { label: "query hr.employee_snapshot directly (job in acme-dw)",
+      needs: [{ perm: JOB, on: "acme-dw" }, { perm: READ, on: "acme-dw/hr/employee_snapshot" }],
+      note: "No view, no filter: if both gates pass, every employee's row and every column, salary included." },
+    { label: "query hr.employee_snapshot directly (job in people-agent-prod)",
+      needs: [{ perm: JOB, on: "people-agent-prod" }, { perm: READ, on: "acme-dw/hr/employee_snapshot" }],
+      note: "The job project and the data project are separate checks. Job User anywhere plus read on <code>hr</code> is enough." },
+    { label: "create a view in hr_views",
+      needs: [{ perm: "bigquery.tables.create", on: "acme-dw/hr_views" }, { perm: READ, on: "acme-dw/hr/employee_snapshot" }, { perm: READ, on: "acme-dw/security/access" }],
+      note: "Google requires view authors in an authorized dataset to read the tables the view references. Whoever passes this already sees all of HR." },
+    { label: "append a turn to agent.turns",
+      needs: [{ perm: "bigquery.tables.updateData", on: "acme-dw/agent/turns" }],
+      note: "Writing with an <code>INSERT</code> statement or a load job is also a job, so it needs Job User somewhere too; that project pays." },
+    { label: "see every user's agent jobs, unredacted",
+      needs: [{ perm: "bigquery.jobs.listAll", on: "people-agent-prod" }],
+      note: "Job details include the SQL the agent wrote for each employee. Without this permission, other users' job details are redacted." },
+    { label: "act as the agent's service account",
+      needs: [{ perm: "iam.serviceAccounts.getAccessToken", on: "people-agent-prod/sa:people-agent" }],
+      note: "Whoever passes gets everything the service account has, including all of <code>agent.turns</code>." }
+  ]
+});
+
+YamlExplain.mount(document.getElementById("yx-grants"), `
+# project acme-dw: the customer's data
+roles/bigquery.admin                  group:data-platform@acme.com
+roles/bigquery.jobUser                group:people-analytics@acme.com
+# dataset acme-dw.hr: base HR tables
+roles/bigquery.dataViewer             group:people-analytics@acme.com
+# dataset acme-dw.security: the access table
+roles/bigquery.dataViewer             group:people-analytics@acme.com
+# dataset acme-dw.hr_views: the authorized dataset
+roles/bigquery.dataViewer             group:all-employees@acme.com
+roles/bigquery.dataEditor             group:people-analytics@acme.com
+# dataset acme-dw.agent
+roles/bigquery.dataEditor             serviceAccount:people-agent@people-agent-prod.iam.gserviceaccount.com
+# table acme-dw.agent.turns: plus Lesson 2's row access policies
+roles/bigquery.dataViewer             group:all-employees@acme.com
+# project people-agent-prod: the agent's jobs run and are billed here
+roles/bigquery.admin                  group:data-platform@acme.com
+roles/bigquery.jobUser                group:all-employees@acme.com
+roles/bigquery.jobUser                serviceAccount:people-agent@people-agent-prod.iam.gserviceaccount.com
+# service account people-agent@people-agent-prod.iam.gserviceaccount.com
+roles/iam.serviceAccountTokenCreator  group:data-platform@acme.com
+`, {
+  1: "Header (course format, not a real file): the grants below are set on the <b>project</b> <code>acme-dw</code>, where the HR data is stored. A project-level grant reaches every dataset and table in it. Storage is billed to this project.",
+  2: "<code>roles/bigquery.admin</code> (BigQuery Admin) to the Google group <code>data-platform@</code>: \"manage all resources within the project\". Set on the project, so it covers <code>hr</code> too: the platform team reads all of HR, past the views. They belong on HR's \"who can see Lia\" list.",
+  3: "<code>roles/bigquery.jobUser</code> (Job User) to <code>people-analytics@</code>: they may run query jobs in <code>acme-dw</code> from the console, and those queries are billed here. On its own it reads no data.",
+  4: "Header: the next grant is on the <b>dataset</b> <code>hr</code> only (written <code>acme-dw.hr</code>: project, then dataset).",
+  5: "<code>roles/bigquery.dataViewer</code> (Data Viewer) to <code>people-analytics@</code>: read every table in <code>hr</code> directly. They need it to write and test views over <code>hr</code>.",
+  6: "Header: the dataset <code>security</code>, which holds the access table from Lesson 2.",
+  7: "Data Viewer to <code>people-analytics@</code>: they read the access table to answer \"which data can X see?\". Employees don't get this.",
+  8: "Header: the dataset <code>hr_views</code>, the authorized dataset whose views may read <code>hr</code> and <code>security</code>.",
+  9: "Data Viewer to <code>all-employees@</code>: read every view in <code>hr_views</code>. Gate 2 for employees. Without it, Access Denied before any filter.",
+  10: "<code>roles/bigquery.dataEditor</code> (Data Editor) to <code>people-analytics@</code>: create, update and delete views here. Lesson 2's warning applies: they decide everyone's filter, so keep the group short.",
+  11: "Header: the dataset <code>agent</code>, where the agent's log lives.",
+  12: "Data Editor to the agent's <b>service account</b>, a non-human identity written <code>serviceAccount:name@project.iam.gserviceaccount.com</code>. Here <code>people-agent</code> is its name and <code>people-agent-prod</code> the project it belongs to. It can write turns in this one dataset, and nothing in <code>hr</code>.",
+  13: "Header: a grant on one <b>table</b>, <code>agent.turns</code>. Its row access policies (Lesson 2) still decide which rows each reader sees.",
+  14: "Data Viewer to <code>all-employees@</code> on this table only, so people can read their own history. The <code>own_turns</code> policy filters it to their rows; without a granting policy they'd see zero rows.",
+  15: "Header: the <b>project</b> <code>people-agent-prod</code>, the agent's own project. The agent creates its query jobs here, so the queries are billed here even though the data is in <code>acme-dw</code>.",
+  16: "BigQuery Admin to <code>data-platform@</code> on the agent's project: they run it, and can see every user's jobs in it unredacted, including the SQL the agent wrote for each employee.",
+  17: "Job User to <code>all-employees@</code>: gate 1 for every agent question. The agent sends the job as the employee, so the <em>employee</em> needs to be allowed to run jobs in this project.",
+  18: "Job User to the agent's service account: it may run its own jobs here, e.g. an <code>INSERT</code> into <code>agent.turns</code>.",
+  19: "Header: grants on the <b>service account itself</b>, as a resource. They control who may act as it.",
+  20: "<code>roles/iam.serviceAccountTokenCreator</code> to <code>data-platform@</code>: they may impersonate the agent, \"to gain the service account's permissions\" (for debugging). Anyone listed here can read every turn."
+});
+
+SpotLine.mount(document.getElementById("spot"), `
+# project acme-dw
+roles/bigquery.admin                  group:data-platform@acme.com
+roles/bigquery.dataViewer             group:all-employees@acme.com
+roles/bigquery.dataEditor             serviceAccount:people-agent@people-agent-prod.iam.gserviceaccount.com
+# dataset acme-dw.hr_views
+roles/bigquery.dataViewer             group:all-employees@acme.com
+roles/bigquery.dataEditor             group:people-analytics@acme.com
+# project people-agent-dev
+roles/bigquery.jobUser                group:all-employees@acme.com
+# project people-agent-prod
+roles/bigquery.jobUser                serviceAccount:people-agent@people-agent-prod.iam.gserviceaccount.com
+# service account people-agent@people-agent-prod.iam.gserviceaccount.com
+roles/iam.serviceAccountTokenCreator  group:support@vendor-partner.com
+`, {
+  tasks: [
+    { q: "Every employee who asks the agent gets <code>Access Denied: … bigquery.jobs.create … people-agent-prod</code>.", answer: 9,
+      fix: "Job User was granted on <code>people-agent-dev</code>, but the agent creates jobs in <code>people-agent-prod</code>. Grant <code>roles/bigquery.jobUser</code> to <code>all-employees@</code> on <code>people-agent-prod</code>." },
+    { q: "Noa ran <code>SELECT * FROM acme-dw.hr.employee_snapshot</code> and saw <b>every employee's salary</b>.", answer: 3,
+      fix: "Data Viewer on the <em>project</em> reaches <code>hr</code>. Delete it; line 6 already gives what employees need. (She ran the job in <code>people-agent-dev</code>: Job User anywhere is enough for gate 1.)" },
+    { q: "A prompt-injection test made the agent's service account <b>overwrite rows in <code>hr.employee_snapshot</code></b>.", answer: 4,
+      fix: "Data Editor on the whole project lets it write anywhere in <code>acme-dw</code>. Grant it on the dataset <code>acme-dw.agent</code> only." },
+    { q: "A vendor support engineer <b>read every employee's agent turns</b>.", answer: 13,
+      fix: "Token Creator lets the vendor's group act as the agent, which reads all turns. Remove it; Google: \"avoid letting users impersonate service accounts that are more privileged than the users themselves.\"" }
+  ],
+  notes: {
+    1: "Header: grants on the project <code>acme-dw</code>, which holds the HR data. They reach every dataset in it.",
+    2: "BigQuery Admin to the data platform team on the data project. Wide, but they run the platform. They're on the \"who can read HR\" list.",
+    3: "Data Viewer to <em>all employees</em> on the whole project: read every table in <code>hr</code>, <code>security</code> and <code>agent</code>.",
+    4: "Data Editor to the agent's service account on the whole project: create, change and delete tables and rows in every dataset.",
+    5: "Header: grants on the authorized dataset <code>hr_views</code>.",
+    6: "Data Viewer to all employees on <code>hr_views</code>: they may read the views. Correct.",
+    7: "Data Editor to People Analytics on <code>hr_views</code>: they maintain the views. Correct.",
+    8: "Header: grants on the project <code>people-agent-dev</code>, the agent's <em>test</em> project.",
+    9: "Job User to all employees on <code>people-agent-dev</code>: they may run jobs in the test project.",
+    10: "Header: grants on the project <code>people-agent-prod</code>, where the production agent creates its jobs.",
+    11: "Job User to the agent's service account on <code>people-agent-prod</code>: it may run its own jobs there. Correct.",
+    12: "Header: grants on the agent's service account as a resource: who may act as it.",
+    13: "Service Account Token Creator to an outside vendor's support group: they may impersonate the agent."
+  }
+});
+
+YamlExplain.mount(document.getElementById("yx-priv"), `
+-- Grants set on the hr dataset itself
+SELECT object_name, privilege_type, grantee
+FROM \`acme-dw\`.\`region-us\`.INFORMATION_SCHEMA.OBJECT_PRIVILEGES
+WHERE object_name = 'hr';
+
+-- Grants set on the table itself
+SELECT object_name, privilege_type, grantee
+FROM \`acme-dw\`.\`region-us\`.INFORMATION_SCHEMA.OBJECT_PRIVILEGES
+WHERE object_schema = 'hr' AND object_name = 'employee_snapshot';
+`, {
+  1: "A comment. The first query lists grants made on the <em>dataset</em> <code>hr</code>.",
+  2: "<code>object_name</code>: the dataset, table or view the grant is on. <code>privilege_type</code>: the role, like <code>roles/bigquery.dataViewer</code>. <code>grantee</code>: the member, like <code>group:people-analytics@acme.com</code>. One row per grant.",
+  3: "<code>OBJECT_PRIVILEGES</code> is a metadata view in <code>INFORMATION_SCHEMA</code>. <code>\`acme-dw\`</code> is the project (backticks for the hyphen). <code>\`region-us\`</code> is required: use the region your dataset lives in, e.g. <code>region-eu</code>. Reading it needs <code>bigquery.datasets.get</code> on the dataset.",
+  4: "<code>WHERE object_name = 'hr'</code>: required; the view only answers for one dataset, table or view at a time. For a dataset, name it in <code>object_name</code>. <code>;</code> ends the statement.",
+  6: "The second query lists grants made on one <em>table</em>.",
+  7: "The same three columns.",
+  8: "The same view. Reading table grants needs <code>bigquery.tables.getIamPolicy</code> on the table.",
+  9: "For a table or view, both are required: <code>object_schema</code> is its dataset (<code>hr</code>), <code>object_name</code> the table. <code>;</code> ends it. Neither query shows grants inherited from the project, a folder or the organization."
+});
+</script>
+</body>
+</html>

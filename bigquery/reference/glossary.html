@@ -6,7 +6,7 @@
 <link rel="stylesheet" href="../assets/course.css">
 </head>
 <body><main>
-<div class="crumbs">Lessons: <a href="../lessons/0001-what-a-query-is-billed-for.html">1</a> · <a href="../lessons/0002-each-user-sees-only-their-rows.html">2</a> · Reference: <a href="query-cost.html">Query cost</a> · <a href="row-security.html">Row security</a></div>
+<div class="crumbs">Lessons: <a href="../lessons/0001-what-a-query-is-billed-for.html">1</a> · <a href="../lessons/0002-each-user-sees-only-their-rows.html">2</a> · <a href="../lessons/0003-who-can-do-what.html">3</a> · Reference: <a href="query-cost.html">Query cost</a> · <a href="row-security.html">Row security</a> · <a href="iam-and-billing.html">IAM &amp; billing</a></div>
 <h1>Glossary</h1>
 <p class="subtitle">The course's single source of truth for terms. Lessons use these words exactly as defined here. Definitions are quoted or adapted from Google Cloud's BigQuery docs.</p>
 
@@ -18,7 +18,7 @@
 <tr><td><b>Slot</b></td><td>A unit of BigQuery compute. Capacity customers buy slots; on-demand queries use shared ones.</td><td><a href="https://cloud.google.com/bigquery/pricing">pricing</a> · L1</td></tr>
 <tr><td><b>Bytes processed / bytes billed</b></td><td>Processed: logical bytes read from the referenced columns. Billed: processed, rounded up to the MB, minimum 10 MB per referenced table.</td><td><a href="https://cloud.google.com/bigquery/pricing">pricing</a> · L1</td></tr>
 <tr><td><b>Logical bytes</b></td><td>Uncompressed size. On-demand query cost always uses logical bytes.</td><td><a href="https://docs.cloud.google.com/bigquery/docs/estimate-costs">docs</a> · L1</td></tr>
-<tr><td><b>Billing project</b></td><td>The project a job runs in. It pays for the query, whoever owns the data.</td><td><a href="https://docs.cloud.google.com/bigquery/docs/jobs-overview">docs</a> · L1</td></tr>
+<tr><td><b>Billing project</b></td><td>The project a job runs in (also: job project). It pays for the query, whoever owns the data; the data's project pays for storage. Named before the colon in the job ID.</td><td><a href="https://docs.cloud.google.com/bigquery/docs/managing-jobs">docs</a> · L1, L3</td></tr>
 <tr><td><b>Job</b></td><td>One unit of work BigQuery runs for you: query, load, extract or copy. History is in <code>INFORMATION_SCHEMA.JOBS</code> (180 days).</td><td><a href="https://docs.cloud.google.com/bigquery/docs/information-schema-jobs">docs</a> · L1</td></tr>
 <tr><td><b>Query cache</b></td><td>Stored results of a previous identical query on unchanged tables. Cached answers are free (<code>cache_hit</code> in the job history).</td><td><a href="https://cloud.google.com/bigquery/pricing">pricing</a> · L1</td></tr>
 <tr><td><b>Dry run</b></td><td>Validate a query and estimate its bytes without reading data. Free. An upper bound. Returns 0 on row-level-secured tables.</td><td><a href="https://docs.cloud.google.com/bigquery/docs/best-practices-costs">docs</a> · L1</td></tr>
@@ -50,8 +50,25 @@
 <tr><td><b>Access reason</b></td><td>Why a viewer sees an employee: <code>SELF</code>, <code>MANAGER_TREE</code>, <code>HRBP_TREE</code>, <code>PEOPLE_ANALYTICS</code>. Two reasons for one pair duplicate rows in a JOIN.</td><td>L2</td></tr>
 <tr><td><b>Authorized view</b></td><td>A view in its own dataset, granted read access to the source dataset, so users can query the view without access to the source.</td><td><a href="https://docs.cloud.google.com/bigquery/docs/authorized-views">docs</a> · L2</td></tr>
 <tr><td><b>Authorized dataset</b></td><td>A dataset whose views may read a source dataset. Covers "all current and future views" in it.</td><td><a href="https://docs.cloud.google.com/bigquery/docs/authorized-datasets">docs</a> · L2</td></tr>
-<tr><td><b>Service account</b></td><td>A non-human identity an app uses to call Google APIs, written <code>name@project.iam.gserviceaccount.com</code>.</td><td>L2</td></tr>
+<tr><td><b>Service account</b></td><td>A non-human identity an app uses to call Google APIs, written <code>name@project.iam.gserviceaccount.com</code>. Also a resource: grants on it decide who may act as it.</td><td><a href="https://docs.cloud.google.com/iam/docs/best-practices-service-accounts">docs</a> · L2, L3</td></tr>
 <tr><td><b>Side channel</b></td><td>Learning hidden data indirectly, e.g. from query duration or bytes processed. Why BigQuery hides bytes stats on row-secured tables.</td><td><a href="https://docs.cloud.google.com/bigquery/docs/best-practices-row-level-security">docs</a> · L2</td></tr>
+</table>
+
+<h2>Who may do what (IAM)</h2>
+<table>
+<tr><th>Term</th><th>Meaning</th><th>From</th></tr>
+<tr><td><b>IAM</b></td><td>Google Cloud's access system: who (member) may do what (role) on which resource.</td><td><a href="https://docs.cloud.google.com/bigquery/docs/access-control">docs</a> · L3</td></tr>
+<tr><td><b>Member</b></td><td>Who a grant is for: <code>user:</code>, <code>group:</code>, <code>serviceAccount:</code>, <code>domain:</code>. Google also says "principal".</td><td><a href="https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/data-control-language">docs</a> · L3</td></tr>
+<tr><td><b>Permission</b></td><td>One allowed action, like <code>bigquery.jobs.create</code> or <code>bigquery.tables.getData</code>.</td><td><a href="https://docs.cloud.google.com/bigquery/docs/access-control">docs</a> · L3</td></tr>
+<tr><td><b>Role</b></td><td>A named set of permissions, like <code>roles/bigquery.dataViewer</code>.</td><td><a href="https://docs.cloud.google.com/bigquery/docs/access-control">docs</a> · L3</td></tr>
+<tr><td><b>Grant / role binding</b></td><td>One role given to one member on one resource. A resource's grants form its <b>allow policy</b>.</td><td><a href="https://docs.cloud.google.com/iam/docs/resource-hierarchy-access-control">docs</a> · L3</td></tr>
+<tr><td><b>Inheritance</b></td><td>A grant on organization, folder, project or dataset reaches everything under it. Effective access is the union; lower levels can't remove it.</td><td><a href="https://docs.cloud.google.com/iam/docs/resource-hierarchy-access-control">docs</a> · L3</td></tr>
+<tr><td><b>Job User</b></td><td><code>roles/bigquery.jobUser</code>: run jobs in a project. Gate 1 of every query. Project level only.</td><td><a href="https://docs.cloud.google.com/bigquery/docs/access-control">docs</a> · L3</td></tr>
+<tr><td><b>Data Viewer / Editor / Owner</b></td><td>Read data / + create and write tables and views / + everything on the dataset. Grantable down to one table or view.</td><td><a href="https://docs.cloud.google.com/bigquery/docs/access-control">docs</a> · L3</td></tr>
+<tr><td><b>BigQuery Admin</b></td><td><code>roles/bigquery.admin</code>: all BigQuery resources in the project, including every user's jobs.</td><td><a href="https://docs.cloud.google.com/bigquery/docs/access-control">docs</a> · L3</td></tr>
+<tr><td><b>Basic roles</b></td><td>Project Owner, Editor, Viewer. Predate IAM; get OWNER/WRITER/READER on new datasets. Google: avoid.</td><td><a href="https://docs.cloud.google.com/bigquery/docs/access-control-basic-roles">docs</a> · L3</td></tr>
+<tr><td><b>Impersonation</b></td><td>Acting as a service account "to gain the service account's permissions". Needs <code>iam.serviceAccounts.getAccessToken</code> (Token Creator).</td><td><a href="https://docs.cloud.google.com/iam/docs/service-account-impersonation">docs</a> · L3</td></tr>
+<tr><td><b>OBJECT_PRIVILEGES</b></td><td><code>INFORMATION_SCHEMA</code> view of grants set directly on one dataset, table or view. Not inherited ones.</td><td><a href="https://docs.cloud.google.com/bigquery/docs/information-schema-object-privileges">docs</a> · L3</td></tr>
 </table>
 </main></body>
 </html>
