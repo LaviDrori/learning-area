@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Databricks Glossary</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body><main>
+<div class="crumbs">Lessons: <a href="../lessons/0001-the-map-of-the-platform.html">1</a> · Reference: <a href="platform-map.html">Platform map</a></div>
+<h1>Glossary</h1>
+<p class="subtitle">The course's single source of truth for terms. Lessons use these words exactly as defined here. Definitions are quoted or adapted from the Databricks docs (AWS pages unless noted).</p>
+
+<h2>Platform</h2>
+<table>
+<tr><th>Term</th><th>Meaning</th><th>From</th></tr>
+<tr><td><b>Account</b></td><td>"The top-level construct" for an organization: identity, billing, workspaces, metastores.</td><td><a href="https://docs.databricks.com/aws/en/getting-started/overview">docs</a> · L1</td></tr>
+<tr><td><b>Workspace</b></td><td>"The collaboration environment where users run compute workloads". Often one per environment (dev, prod).</td><td><a href="https://docs.databricks.com/aws/en/getting-started/overview">docs</a> · L1</td></tr>
+<tr><td><b>Control plane</b></td><td>Backend services Databricks runs in its own account: UI, notebooks, SQL editor, job scheduler, Unity Catalog.</td><td><a href="https://docs.databricks.com/aws/en/getting-started/overview">docs</a> · L1</td></tr>
+<tr><td><b>Compute plane</b></td><td>"Where your data is processed". <b>Classic</b>: in the customer's cloud account. <b>Serverless</b>: in Databricks' account.</td><td><a href="https://docs.databricks.com/aws/en/getting-started/overview">docs</a> · L1</td></tr>
+<tr><td><b>Lakehouse</b></td><td>"Combines the benefits of data lakes and data warehouses": warehouse-style tables over files in object storage.</td><td><a href="https://docs.databricks.com/aws/en/lakehouse/">docs</a> · L1</td></tr>
+</table>
+
+<h2>Unity Catalog</h2>
+<table>
+<tr><th>Term</th><th>Meaning</th><th>From</th></tr>
+<tr><td><b>Unity Catalog (UC)</b></td><td>Names, permissions, lineage and audit for data and AI assets, shared by all workspaces attached to its metastore.</td><td><a href="https://docs.databricks.com/aws/en/data-governance/unity-catalog/">docs</a> · L1</td></tr>
+<tr><td><b>Metastore</b></td><td>UC's top container, one per region, "registers metadata about data, AI, and permissions".</td><td><a href="https://docs.databricks.com/aws/en/getting-started/concepts">docs</a> · L1</td></tr>
+<tr><td><b>Catalog · schema</b></td><td>The first two parts of <code>catalog.schema.object</code>. Like a BigQuery project and dataset, but holding only names and grants.</td><td><a href="https://docs.databricks.com/aws/en/data-governance/unity-catalog/">docs</a> · L1</td></tr>
+<tr><td><b>Managed table</b></td><td>UC handles governance <em>and</em> the files. The default. DROP deletes the files after a 7-day recovery window (UNDROP until then).</td><td><a href="https://docs.databricks.com/aws/en/tables/managed">docs</a> · L1</td></tr>
+<tr><td><b>External table</b></td><td>UC handles governance only. Files live at a path you manage and survive DROP.</td><td><a href="https://docs.databricks.com/aws/en/tables/managed">docs</a> · L1</td></tr>
+<tr><td><b>Volume</b></td><td>A UC object governing non-table files. Path: <code>/Volumes/&lt;catalog&gt;/&lt;schema&gt;/&lt;volume&gt;/…</code></td><td><a href="https://docs.databricks.com/aws/en/volumes/">docs</a> · L1</td></tr>
+<tr><td><b>hive_metastore</b></td><td>The legacy, per-workspace catalog from before UC. No UC grants, lineage or audit. Migrate away from it.</td><td><a href="https://docs.databricks.com/aws/en/data-governance/unity-catalog/hive-metastore">docs</a> · L1</td></tr>
+<tr><td><b>Service principal</b></td><td>A non-human identity, such as an app or a job, that can be granted permissions. The Databricks counterpart of a service account.</td><td><a href="https://docs.databricks.com/aws/en/data-governance/unity-catalog/">docs</a> · L1</td></tr>
+</table>
+
+<h2>Compute and cost</h2>
+<table>
+<tr><th>Term</th><th>Meaning</th><th>From</th></tr>
+<tr><td><b>DBU</b></td><td>Databricks Unit: "units of processing capability per hour based on VM instance type", billed per second while compute runs.</td><td><a href="https://docs.databricks.com/aws/en/getting-started/concepts">docs</a> · L1</td></tr>
+<tr><td><b>Classic vs serverless cost</b></td><td>Classic: DBUs + VM, disk and network on the customer's cloud bill. Serverless: VM cost is included in the DBU price.</td><td><a href="https://docs.databricks.com/aws/en/lakehouse-architecture/cost-optimization/best-practices">docs</a> · L1</td></tr>
+<tr><td><b>SQL warehouse</b></td><td>Compute for SQL (editor, dashboards, BI tools). Types: serverless (recommended), pro, classic.</td><td><a href="https://docs.databricks.com/aws/en/compute/sql-warehouse/warehouse-types">docs</a> · L1</td></tr>
+<tr><td><b>Auto stop</b></td><td>Stops an idle warehouse after N minutes. Default 10 (serverless) or 45 (pro/classic). Idle warehouses bill until stopped.</td><td><a href="https://docs.databricks.com/aws/en/compute/sql-warehouse/create">docs</a> · L1</td></tr>
+<tr><td><b>All-purpose compute</b></td><td>A classic cluster for interactive, shared notebook work.</td><td><a href="https://docs.databricks.com/aws/en/getting-started/concepts">docs</a> · L1</td></tr>
+<tr><td><b>Jobs compute</b></td><td>A classic cluster created for one job run and terminated when it ends.</td><td><a href="https://docs.databricks.com/aws/en/getting-started/concepts">docs</a> · L1</td></tr>
+<tr><td><b>Photon</b></td><td>"The Databricks-native vectorized query engine". On by default for SQL warehouses and serverless.</td><td><a href="https://docs.databricks.com/aws/en/compute/photon">docs</a> · L1</td></tr>
+</table>
+
+<h2>Tables</h2>
+<table>
+<tr><th>Term</th><th>Meaning</th><th>From</th></tr>
+<tr><td><b>Delta Lake</b></td><td>The default table format: Parquet data files + a JSON transaction log, giving ACID transactions.</td><td><a href="https://docs.databricks.com/aws/en/delta/">docs</a> · L1</td></tr>
+<tr><td><b>Time travel</b></td><td>Read an earlier version with <code>VERSION AS OF</code> / <code>TIMESTAMP AS OF</code>. 7 days back by default. History is kept 30 days.</td><td><a href="https://docs.databricks.com/aws/en/delta/history">docs</a> · L1</td></tr>
+<tr><td><b>Liquid clustering</b></td><td>Data layout that "replaces table partitioning and ZORDER". Recommended for all new tables.</td><td><a href="https://docs.databricks.com/aws/en/delta/clustering">docs</a> · L1</td></tr>
+<tr><td><b>Medallion (bronze/silver/gold)</b></td><td>A convention, not a feature: raw → validated and cleaned → business-ready tables.</td><td><a href="https://docs.databricks.com/aws/en/lakehouse/medallion">docs</a> · L1</td></tr>
+</table>
+</main></body>
+</html>
