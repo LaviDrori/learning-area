@@ -54,3 +54,18 @@ open jenkins/lessons/0001-from-pull-request-to-green-check.html   # xdg-open on 
 ## Continue or add a topic
 
 Run `/mattpocock-skills:teach <what you want>` from the repo root. It picks the matching topic folder, or creates a new one (with its own `MISSION.md`) for a new topic.
+
+## Contribute a topic
+
+**Everyone is invited to add a topic.** Fork the repo, add your topic folder on a branch, and open a pull request. Any subject is welcome.
+
+Keeping to the current format is recommended, so every topic looks and works the same way:
+
+- **Build it with the teach skill.** In [Claude Code](https://claude.com/claude-code), run `/mattpocock-skills:teach <your topic>` from the repo root. It starts with a short interview that writes your `MISSION.md`. [`CLAUDE.md`](CLAUDE.md) holds the house rules and Claude reads it automatically.
+- **Use one self-contained folder:** `<topic>/` with the layout shown under [Structure](#structure). Nothing goes at the repo root.
+- **Copy assets into your topic, don't link to them:** take `course.css`, `quiz.js` and `yaml-explain.js` from an existing topic's `assets/`, and give `course.css` its own `--accent` colour.
+- **Explain every line:** show every file (YAML, Dockerfile, SQL, config) with the `yaml-explain.js` widget, and give a note to each line that has a command or value.
+- **Add a row to the [Topics](#topics) table** for your topic, with its lesson count and a link to lesson 1.
+- **Keep secrets and private data out.** The repo is public. Use placeholder names such as `acme`.
+
+Contributions are published under the repo's [MIT license](LICENSE).
