@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IAM and Billing Cheat Sheet</title>
+<link rel="stylesheet" href="../assets/course.css">
+<style> pre .c { color: var(--muted); } </style>
+</head>
+<body><main>
+<div class="crumbs">Lessons: <a href="../lessons/0001-what-a-query-is-billed-for.html">1</a> · <a href="../lessons/0002-each-user-sees-only-their-rows.html">2</a> · <a href="../lessons/0003-who-can-do-what.html">3</a> · Reference: <a href="glossary.html">Glossary</a> · <a href="query-cost.html">Query cost</a> · <a href="row-security.html">Row security</a></div>
+<h1>IAM &amp; Billing</h1>
+<p class="subtitle">Who may run, read and write, and who pays. Sources: <a href="https://docs.cloud.google.com/bigquery/docs/running-queries">Run a query</a> · <a href="https://docs.cloud.google.com/bigquery/docs/access-control">BigQuery IAM roles</a> · <a href="https://docs.cloud.google.com/iam/docs/resource-hierarchy-access-control">IAM resource hierarchy</a> · <a href="https://docs.cloud.google.com/bigquery/docs/managing-jobs">Manage jobs</a> · <a href="https://docs.cloud.google.com/bigquery/docs/control-access-to-resources-iam">Control access with IAM</a>.</p>
+
+<h2>Every query: three checks</h2>
+<table>
+<tr><th>Check</th><th>Needs</th><th>Fails as</th></tr>
+<tr><td>1 · run a job</td><td><code>bigquery.jobs.create</code> on the <b>job's project</b> (Job User). That project pays for the query.</td><td>Access Denied</td></tr>
+<tr><td>2 · read what's named</td><td><code>bigquery.tables.getData</code> on every table/view referenced (Data Viewer). Normal view: on its tables too. Authorized view/dataset: not on the source.</td><td>Access Denied</td></tr>
+<tr><td>3 · which rows</td><td>view's <code>SESSION_USER()</code> filter or row access policies (<a href="row-security.html">row security</a>)</td><td>zero rows, no error</td></tr>
+</table>
+
+<h2>Roles</h2>
+<table>
+<tr><th>Role</th><th>Gives</th><th>Lowest level</th></tr>
+<tr><td><code>roles/bigquery.jobUser</code></td><td>run jobs; see/cancel own jobs</td><td>project</td></tr>
+<tr><td><code>roles/bigquery.dataViewer</code></td><td>read data (query, export, replicate, snapshot)</td><td>table/view</td></tr>
+<tr><td><code>roles/bigquery.dataEditor</code></td><td>+ create/update/delete tables and views, write rows</td><td>table/view</td></tr>
+<tr><td><code>roles/bigquery.dataOwner</code></td><td>everything on the dataset and its contents</td><td>table/view</td></tr>
+<tr><td><code>roles/bigquery.admin</code></td><td>all resources in the project, all users' jobs unredacted</td><td>project (in practice)</td></tr>
+<tr><td><code>roles/iam.serviceAccountTokenCreator</code></td><td>impersonate the service account = get its access</td><td>service account</td></tr>
+<tr><td>basic Owner / Editor / Viewer</td><td>OWNER / WRITER / READER on new datasets by default. Avoid.</td><td>project</td></tr>
+</table>
+
+<h2>Rules</h2>
+<ul>
+  <li>Hierarchy: organization → folders → project → dataset → table/view. Grants <b>flow down</b> and <b>only add</b> (union). A dataset can't take back a project grant.</li>
+  <li>Job project ≠ data project. Query billed to the job's project; storage to the data's project. Job ID <code>project:region.job_id</code> names who paid.</li>
+  <li>Service accounts: one per purpose, least privilege on the narrowest resource, no keys if avoidable. Who can impersonate it has its access.</li>
+  <li><code>bigquery.jobs.listAll</code> = every user's job details, including the SQL.</li>
+</ul>
+
+<h2>Course setup (People Analytics)</h2>
+<pre>acme-dw                 jobUser people-analytics · admin data-platform   <span class="c">-- data project, storage billed</span>
+acme-dw.hr / .security  dataViewer people-analytics                     <span class="c">-- past the views: keep short</span>
+acme-dw.hr_views        dataViewer all-employees · dataEditor PA       <span class="c">-- authorized dataset</span>
+acme-dw.agent           dataEditor people-agent SA                     <span class="c">-- dataset, not project</span>
+acme-dw.agent.turns     dataViewer all-employees                       <span class="c">-- + row access policies</span>
+people-agent-prod       jobUser all-employees, SA · admin data-platform <span class="c">-- agent's jobs run + billed here</span>
+SA people-agent         tokenCreator data-platform                     <span class="c">-- who can act as the agent</span></pre>
+
+<h2>"Who can read hr past the views?"</h2>
+<pre>SELECT object_name, privilege_type, grantee                    <span class="c">-- role + member, one row per grant</span>
+FROM `acme-dw`.`region-us`.INFORMATION_SCHEMA.OBJECT_PRIVILEGES <span class="c">-- region qualifier required</span>
+WHERE object_name = 'hr';                                       <span class="c">-- dataset: object_name only</span>
+<span class="c">-- table: WHERE object_schema = 'hr' AND object_name = 'employee_snapshot'</span></pre>
+<p>Shows only grants set on that object. Add: the project's IAM page (Admin, Data Viewer/Editor/Owner, basic roles), folder/org grants, Token Creators on any service account that reads <code>hr</code>, and holders of <code>jobs.listAll</code>.</p>
+
+<h2>Grant on a dataset or table with SQL</h2>
+<pre>GRANT `roles/bigquery.dataViewer`                     <span class="c">-- the role</span>
+ON SCHEMA `acme-dw`.hr_views                           <span class="c">-- SCHEMA = dataset; also TABLE, VIEW, PROJECT</span>
+TO "group:all-employees@acme.com";                     <span class="c">-- user: group: serviceAccount: domain:</span>
+<span class="c">-- REVOKE `role` ON SCHEMA … FROM "member"; removes it.</span></pre>
+</main></body>
+</html>
