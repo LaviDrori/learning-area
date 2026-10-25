@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Map of the Platform</title>
+<link rel="stylesheet" href="../assets/course.css">
+<style>
+  .map svg text { font-family: var(--mono); font-size: 11px; fill: var(--fg); }
+  .map svg .title { font-weight: 600; font-size: 12px; }
+  .map svg .muted { fill: var(--muted); }
+  .map svg .outer { fill: none; stroke: var(--rule); stroke-width: 1.5; stroke-dasharray: 5 4; }
+  .map svg .box { fill: var(--panel); stroke: var(--rule); stroke-width: 1; }
+  .map svg .hl { fill: var(--panel); stroke: var(--accent); stroke-width: 1.5; }
+  .map svg .arrow { stroke: var(--accent); stroke-width: 1.5; fill: none; }
+  .map svg .arrow.dash { stroke-dasharray: 4 3; }
+  .story { border-left: 3px solid var(--rule); padding-left: 1rem; margin: 1rem 0; }
+</style>
+</head>
+<body><main>
+<div class="crumbs">Databricks · Lesson 1 · <a href="../reference/glossary.html">Glossary</a> · <a href="../reference/platform-map.html">Platform map cheat sheet</a></div>
+
+<h1>The Map of the Platform</h1>
+<p class="subtitle">Where the data lives, where it's processed, who decides who sees it, and what the meter is counting. ~25 minutes.</p>
+
+<div class="goal"><strong>Your win today:</strong> draw the customer's Databricks platform as four boxes from memory, follow one query through them, and place any phrase from the next meeting (<em>"grant it in UC"</em>, <em>"spin up a warehouse"</em>, <em>"the DLT pipeline failed"</em>, <em>"it's in bronze"</em>) on that map.</div>
+
+<h2>0. Predict first <span class="score"></span></h2>
+<p>Guess even if you're unsure. You'll know both answers by section 3.</p>
+<div class="quiz" data-answer="1">
+  <p class="q">The customer says "our orders table is in Databricks". On a classic workspace, where are the table's bytes actually stored?</p>
+  <button>on Databricks' own servers, like BigQuery</button>
+  <button>as files in the customer's cloud bucket</button>
+  <button>inside the running cluster's local disks</button>
+  <p class="why">Classic compute and the "workspace storage bucket" both sit "in your AWS account", the customer's. Tables are Parquet files plus a log, in their object storage. Clusters come and go; the files stay. (A newer <em>serverless</em> workspace can use Databricks-managed default storage instead, so it's worth asking which kind they have.)<span class="note"><a href="https://docs.databricks.com/aws/en/getting-started/overview">High-level architecture</a></span></p>
+</div>
+<div class="quiz" data-answer="2">
+  <p class="q">A SQL warehouse sits idle all afternoon and nobody runs a single query on it. What does that afternoon cost?</p>
+  <button>nothing, since no bytes are scanned</button>
+  <button>a small fixed monthly platform fee</button>
+  <button>DBUs for each minute it's up</button>
+  <p class="why">"Idle SQL warehouses continue to accumulate DBU and cloud instance charges until they are stopped." Databricks bills <em>compute time</em>, not bytes read. That's the big switch from BigQuery on-demand. The guard is <b>auto stop</b>: stop after N idle minutes.<span class="note"><a href="https://docs.databricks.com/aws/en/compute/sql-warehouse/create">Configure a SQL warehouse</a></span></p>
+</div>
+
+<h2>1. Four boxes</h2>
+<p>In BigQuery you never see storage or compute. Google runs both, and you only see projects, datasets and jobs. Databricks splits them apart, and part of it runs in the <em>customer's</em> cloud account. Databricks' own words:<span class="note"><a href="https://docs.databricks.com/aws/en/getting-started/overview">High-level architecture</a></span></p>
+<ul>
+  <li><b>Control plane</b>: "the backend services that Databricks manages in your Databricks account". The web UI, the notebooks and SQL editor, the job scheduler, and Unity Catalog live here.</li>
+  <li><b>Compute plane</b>: "where your data is processed". It comes in two kinds:
+    <ul>
+      <li><b>Classic</b> compute is "created within each workspace's virtual network in the customer's AWS account".</li>
+      <li><b>Serverless</b> compute runs "in a serverless compute plane in your Databricks account".</li>
+    </ul>
+  </li>
+  <li><b>Storage</b>: the customer's cloud object storage (S3, Azure storage, GCS). Tables live there as files.</li>
+</ul>
+<figure class="map">
+<svg viewBox="0 0 640 330" role="img" aria-label="Left: Databricks' cloud account, holding the control plane (web UI, SQL editor, notebooks, job scheduler, Unity Catalog) and the serverless compute plane. Right: the customer's cloud account, holding the classic compute plane (clusters, pro and classic SQL warehouses) and cloud object storage (Delta tables as Parquet files plus a transaction log, and volumes). Arrows: control plane sends work to both compute planes; both compute planes read and write storage.">
+  <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker></defs>
+  <rect class="outer" x="8" y="22" width="300" height="300" rx="8"/>
+  <text x="18" y="16" class="muted">Databricks' cloud account</text>
+  <rect class="outer" x="332" y="22" width="300" height="300" rx="8"/>
+  <text x="342" y="16" class="muted">Customer's cloud account (AWS / Azure / GCP)</text>
+
+  <rect class="hl" x="22" y="38" width="272" height="150" rx="5"/>
+  <text x="34" y="58" class="title">① Control plane</text>
+  <text x="34" y="80">web UI · SQL editor · notebooks</text>
+  <text x="34" y="100">job scheduler (Lakeflow Jobs)</text>
+  <text x="34" y="126" class="title">Unity Catalog</text>
+  <text x="34" y="146">catalog.schema.table names,</text>
+  <text x="34" y="164">who may see what, lineage, audit</text>
+
+  <rect class="box" x="22" y="206" width="272" height="102" rx="5"/>
+  <text x="34" y="226" class="title">② Serverless compute plane</text>
+  <text x="34" y="248">serverless SQL warehouses</text>
+  <text x="34" y="268">serverless notebooks, jobs,</text>
+  <text x="34" y="286">and pipelines</text>
+
+  <rect class="box" x="346" y="38" width="272" height="110" rx="5"/>
+  <text x="358" y="58" class="title">③ Classic compute plane</text>
+  <text x="358" y="80">clusters: all-purpose, jobs</text>
+  <text x="358" y="100">pro and classic SQL warehouses</text>
+  <text x="358" y="128" class="muted">VMs the customer's cloud bills</text>
+
+  <rect class="hl" x="346" y="192" width="272" height="116" rx="5"/>
+  <text x="358" y="212" class="title">④ Cloud object storage</text>
+  <text x="358" y="234">Delta tables = Parquet files</text>
+  <text x="358" y="252">  + transaction log</text>
+  <text x="358" y="276">volumes: any other files</text>
+  <text x="358" y="296" class="muted">S3 · Azure storage · GCS</text>
+
+  <path class="arrow" d="M296,92 L342,92" marker-end="url(#ah)"/>
+  <text x="300" y="86" class="muted" font-size="9">work</text>
+  <path class="arrow" d="M150,190 L150,202" marker-end="url(#ah)"/>
+  <path class="arrow" d="M482,150 L482,188" marker-end="url(#ah)"/>
+  <text x="488" y="174" class="muted" font-size="9">read / write</text>
+  <path class="arrow dash" d="M296,258 L342,258" marker-end="url(#ah)"/>
+</svg>
+<figcaption>Highlighted: the two boxes that last. Compute (② and ③) is temporary and can be started, stopped or resized. Names (Unity Catalog) and files (storage) persist. The diagram shows a classic workspace on AWS; Azure is the same shape, with the customer's Azure subscription on the right.<span class="note"><a href="https://learn.microsoft.com/en-us/azure/databricks/getting-started/high-level-architecture">Azure architecture</a></span></figcaption>
+</figure>
+<p>Above the boxes sits the <b>account</b>, "the top-level construct that you use to manage Databricks across your organization": identity, billing, and the list of <b>workspaces</b>. A workspace is "the collaboration environment where users run compute workloads". It's what the customer means by "our Databricks", often one each for dev and prod.<span class="note"><a href="https://docs.databricks.com/aws/en/getting-started/overview">High-level architecture</a></span></p>
+
+<h2>2. Unity Catalog: the names and the permissions</h2>
+<p><b>Unity Catalog</b> (everyone says "UC") is "an account-level metastore that registers metadata about data, AI, and permissions". One metastore serves every workspace in a region, so a table and its grants look the same from dev and prod.<span class="note"><a href="https://docs.databricks.com/aws/en/getting-started/concepts">Databricks components</a> · <a href="https://docs.databricks.com/aws/en/data-governance/unity-catalog/">Unity Catalog</a></span> Every object has a three-part name, which you already know from BigQuery:</p>
+<table>
+<tr><th>BigQuery</th><th>Databricks</th><th>Example</th></tr>
+<tr><td>project</td><td><b>catalog</b></td><td><code>acme</code></td></tr>
+<tr><td>dataset</td><td><b>schema</b></td><td><code>acme.sales</code></td></tr>
+<tr><td>table / view</td><td><b>table / view / volume / function / model</b></td><td><code>acme.sales.orders</code></td></tr>
+</table>
+<p class="note">The project→catalog, dataset→schema mapping is Databricks' own, from their <a href="https://www.databricks.com/blog/bigquery-databricks-strategic-framework-modern-migration">BigQuery migration guide</a>. One difference: a BigQuery project also holds billing and jobs. A catalog is only a container for names and grants.</p>
+<p>Three more words you'll hear:</p>
+<ul>
+  <li><b>Managed vs external table.</b> Managed: "Unity Catalog handles both governance and the underlying file storage lifecycle". It's "the default and recommended table type", and dropping one deletes its files after a recovery window (7 days by default). External: "Unity Catalog handles governance only". The files sit at a path someone else owns and survive a DROP.<span class="note"><a href="https://docs.databricks.com/aws/en/tables/managed">Managed tables</a></span></li>
+  <li><b>Volume.</b> "Governance over non-tabular datasets": CSVs, images, PDFs, model files, at paths like <code>/Volumes/acme/sales/raw_files/…</code>.<span class="note"><a href="https://docs.databricks.com/aws/en/volumes/">Volumes</a></span></li>
+  <li><b><code>hive_metastore</code>.</b> The old, per-workspace catalog from before UC: "a legacy feature". If the customer still has tables there, they're mid-migration, and those tables don't get UC's grants, lineage or audit.<span class="note"><a href="https://docs.databricks.com/aws/en/data-governance/unity-catalog/hive-metastore">Hive metastore</a></span></li>
+</ul>
+<p>Grants to users, groups and service principals, lineage ("how data and AI assets flow and connect"), and an audit log of "all data access" all live in UC. When someone says "grant it in UC", this is the box they mean. Per-user rows and masked columns live here too (Lesson 3).</p>
+
+<h2>3. Compute: what the meter counts</h2>
+<p>Databricks bills in <b>DBUs</b> (Databricks Units): "units of processing capability per hour based on VM instance type", charged "per second" while compute is running.<span class="note"><a href="https://docs.databricks.com/aws/en/getting-started/concepts">Components</a> · <a href="https://www.databricks.com/product/pricing">Pricing</a></span> Who sends the bill depends on where the compute runs:</p>
+<ul>
+  <li><b>Classic:</b> "DBUs plus virtual machine, disk, and associated network costs". That's two bills: one from Databricks, one from the customer's cloud provider.</li>
+  <li><b>Serverless:</b> "the DBU cost already includes the virtual machine costs".<span class="note"><a href="https://docs.databricks.com/aws/en/lakehouse-architecture/cost-optimization/best-practices">Cost optimization</a></span></li>
+</ul>
+<table>
+<tr><th>Compute</th><th>For</th><th>You'll hear</th></tr>
+<tr><td><b>SQL warehouse</b>: serverless, pro or classic</td><td>SQL: the SQL editor, dashboards, BI tools, apps that send SQL. Serverless is the recommended type.</td><td>"spin up a warehouse", "DBSQL", "a 2X-Small"</td></tr>
+<tr><td><b>All-purpose compute</b> (classic cluster)</td><td>Interactive notebooks, shared by people "to do collaborative interactive analysis".</td><td>"my cluster", "attach to the shared cluster"</td></tr>
+<tr><td><b>Jobs compute</b> (classic cluster)</td><td>One scheduled run. The scheduler "terminates the cluster when the job is complete".</td><td>"job cluster"</td></tr>
+<tr><td><b>Serverless</b> for notebooks, jobs and pipelines</td><td>The same work as the two rows above, without managing VMs.</td><td>"just run it on serverless"</td></tr>
+</table>
+<p class="note">Sources: <a href="https://docs.databricks.com/aws/en/compute/">Compute</a>, <a href="https://docs.databricks.com/aws/en/compute/sql-warehouse/warehouse-types">SQL warehouse types</a>, <a href="https://docs.databricks.com/aws/en/getting-started/concepts">Components</a>. The current docs also split classic clusters into "standard" (shared) and "dedicated" (single user or group) access modes.</p>
+<p>All of them run <b>Photon</b>, "the Databricks-native vectorized query engine", by default on SQL warehouses and serverless.<span class="note"><a href="https://docs.databricks.com/aws/en/compute/photon">Photon</a></span> The BigQuery bridge (my analogy, not Databricks'): think of a SQL warehouse as a reservation of slots that you switch on and off. You pay while it's on, busy or not, which is why <b>auto stop</b> matters: 10 idle minutes by default for serverless, 45 for pro and classic.<span class="note"><a href="https://docs.databricks.com/aws/en/compute/sql-warehouse/create">Configure a SQL warehouse</a></span></p>
+
+<h2>4. Delta: what a "table" is on disk</h2>
+<p>"Delta Lake is the default format for all operations on Databricks." It "extends Parquet data files with a file-based transaction log for ACID transactions". A table is a folder of Parquet files plus a log of JSON commits that says which files make up each version.<span class="note"><a href="https://docs.databricks.com/aws/en/delta/">Delta Lake</a></span> Because old versions stay in the log, you can read the table as it was: <b>time travel</b>, 7 days back by default (BigQuery's default window is also 7 days).<span class="note"><a href="https://docs.databricks.com/aws/en/delta/history">Table history</a></span> New tables use <b>liquid clustering</b>, which "replaces table partitioning and ZORDER".<span class="note"><a href="https://docs.databricks.com/aws/en/delta/clustering">Liquid clustering</a></span></p>
+<p>Here's what that looks like in Databricks SQL. Click each line marked ●.</p>
+<div id="yx-delta"></div>
+<p>When people talk about <b>bronze / silver / gold</b> ("medallion architecture"), they mean a naming convention for these tables, not a feature. Bronze is "raw, unvalidated data", silver is "validated, cleaned, and enriched", and gold holds "highly refined views" for the business. Often each layer is its own schema, like <code>acme.bronze</code>, <code>acme.silver</code>, <code>acme.gold</code>.<span class="note"><a href="https://docs.databricks.com/aws/en/lakehouse/medallion">Medallion architecture</a></span></p>
+
+<h2>5. Follow one query</h2>
+<p>An analyst at the customer clicks <b>Run</b>. Predict each hop before you reveal it.</p>
+<div id="flow"></div>
+
+<h2>6. Names, old and new</h2>
+<p>Databricks renamed a lot in 2025-2026, so the customer's team will mix old and new names. Here are the ones you'll hear most. The full list is in the <a href="../reference/platform-map.html">cheat sheet</a>.</p>
+<table>
+<tr><th>They might say</th><th>Current name</th><th>Box</th></tr>
+<tr><td>"Workflows", "the job"</td><td><b>Lakeflow Jobs</b>: schedules multi-task workloads</td><td>①</td></tr>
+<tr><td>"DLT", "Delta Live Tables"</td><td><b>Lakeflow pipelines</b>: declarative pipelines that build and refresh tables</td><td>① + compute</td></tr>
+<tr><td>"Auto Loader"</td><td>Same name. "Incrementally … processes new data files as they arrive in cloud storage"</td><td>compute → ④</td></tr>
+<tr><td>"a Genie space"</td><td><b>Genie Agents</b>: ask questions about a set of tables in plain English</td><td>① + warehouse</td></tr>
+<tr><td>"the Assistant"</td><td><b>Genie Code</b>: AI help inside notebooks and the editor</td><td>①</td></tr>
+<tr><td>"Vector Search", "Mosaic AI"</td><td><b>Databricks AI Search</b></td><td>compute</td></tr>
+<tr><td>"Delta Sharing"</td><td><b>OpenSharing</b>: share tables with another organization</td><td>UC + ④</td></tr>
+</table>
+<p class="note">Sources: <a href="https://docs.databricks.com/aws/en/jobs/">Lakeflow Jobs</a>, <a href="https://docs.databricks.com/aws/en/ldp/where-is-dlt">Where is DLT?</a>, <a href="https://docs.databricks.com/aws/en/ingestion/cloud-object-storage/auto-loader/">Auto Loader</a>, <a href="https://docs.databricks.com/aws/en/genie/">Genie</a>, <a href="https://docs.databricks.com/aws/en/ai-search/ai-search">AI Search</a>, <a href="https://docs.databricks.com/aws/en/delta-sharing/">OpenSharing</a>. Names checked 2026-10-25, and they keep changing.</p>
+
+<h2>7. In the meeting</h2>
+<div class="story">
+<h3>"Why is the Databricks bill up 30%?"</h3>
+<p>You now know the first question to ask: <em>which compute?</em> The usual suspects are an all-purpose cluster nobody turns off, a warehouse with auto stop set high or disabled, or a nightly job running on all-purpose compute instead of jobs compute. Bytes scanned, BigQuery's first suspect, isn't the bill here. Lesson 2 is about this.</p>
+</div>
+<div class="story">
+<h3>"Can your app read the gold tables?"</h3>
+<p>Two separate things have to be true. ① UC must grant your app's identity (a <b>service principal</b>) <code>SELECT</code> on those tables. ② Your app needs compute to run SQL on, usually a SQL warehouse it has permission to use. In BigQuery, that second part was "which project runs the job". Here, it's "which warehouse".</p>
+</div>
+
+<hr>
+<h2>8. Check yourself <span class="score"></span></h2>
+<div class="quiz" data-answer="0">
+  <p class="q">In the meeting: "Just grant the analysts SELECT on the gold schema in UC." Which box does that touch?</p>
+  <button>Unity Catalog in the control plane</button>
+  <button>the cloud bucket's own access rules</button>
+  <button>the SQL warehouse's own settings page</button>
+  <p class="why">Grants are UC metadata, stored in the account-level metastore, which belongs to the control plane. Nobody touches bucket policies for this, and a warehouse's permissions only control who may <em>use that compute</em>, not which tables they can read.</p>
+</div>
+<div class="quiz" data-answer="1">
+  <p class="q">A data engineer says "the DLT pipeline failed last night". What's DLT called now?</p>
+  <button>Lakeflow Jobs: a scheduler that runs tasks</button>
+  <button>Lakeflow pipelines: declarative pipelines that build tables</button>
+  <button>OpenSharing: an open protocol for sharing tables</button>
+  <p class="why">"The product formerly known as Delta Live Tables (DLT) has been updated to Lakeflow pipelines." You declare the tables you want, and the pipeline works out how to build and refresh them. Lakeflow Jobs is the scheduler that often <em>triggers</em> such a pipeline, which is why people mix them up.</p>
+</div>
+<div class="quiz" data-answer="2">
+  <p class="q">In BigQuery you query <code>acme-dw.sales.orders</code>. On Databricks the same table is <code>acme.sales.orders</code>. What is <code>acme</code>?</p>
+  <button>a workspace in the customer's Databricks account</button>
+  <button>a cloud bucket holding the Parquet files</button>
+  <button>a catalog in the Unity Catalog metastore</button>
+  <p class="why">catalog.schema.table. The first part is a <b>catalog</b>, Databricks' equivalent of a BigQuery project as a name container. Workspaces aren't part of a table's name: the same UC table is visible from every workspace attached to the metastore.</p>
+</div>
+<div class="quiz" data-answer="1">
+  <p class="q">The platform team says "we still have some tables in hive_metastore". What are they telling you?</p>
+  <button>those tables are external, stored in their bucket</button>
+  <button>those tables are legacy, not under Unity Catalog</button>
+  <button>those tables are cached in the SQL warehouse</button>
+  <p class="why">"The per-workspace Hive metastore is a legacy feature." Those tables live outside UC, so they miss its grants, lineage and audit, and Databricks recommends migrating them. A good follow-up question: "Are the tables my app needs already in UC?"</p>
+</div>
+<div class="quiz" data-answer="2">
+  <p class="q">"Someone overwrote the gold table an hour ago." Which Delta feature lets them read the version from before?</p>
+  <button>liquid clustering: re-sort the rows by key</button>
+  <button>Auto Loader: reload files from cloud storage</button>
+  <button>time travel: query an earlier table version</button>
+  <p class="why">The transaction log keeps earlier versions. <code>DESCRIBE HISTORY</code> shows the version numbers, and <code>VERSION AS OF</code> reads one (section 4). By default this reaches back 7 days.</p>
+</div>
+<div class="quiz" data-answer="0">
+  <p class="q">A nightly notebook runs on an all-purpose cluster that stays on all day. What does the cost-minded engineer suggest?</p>
+  <button>move it to jobs compute that ends with the run</button>
+  <button>switch the table format from Delta to plain Parquet files</button>
+  <button>add a LIMIT so that far fewer bytes are scanned</button>
+  <p class="why">Jobs compute starts for the run and "terminates the cluster when the job is complete", so the meter stops. You pay for compute time, so LIMIT doesn't help the bill, and dropping Delta loses transactions and time travel without saving DBUs.</p>
+</div>
+<div class="recall">
+  <p class="q">Without scrolling up: name the four boxes, say which two persist, and say what the meter counts.</p>
+  <div class="model">① Control plane (UI, scheduler, Unity Catalog) and ② serverless compute, both in Databricks' account. ③ Classic compute and ④ cloud object storage, both in the customer's account. Unity Catalog and storage persist; compute is temporary. The meter counts DBUs per second while compute runs, plus VM costs on the customer's cloud bill for classic compute.</div>
+</div>
+
+<hr>
+<div class="callout source"><b>Primary source, read this next (~10 min):</b> <a href="https://docs.databricks.com/aws/en/getting-started/overview">Databricks, High-level architecture</a>, the source for this lesson's diagram. Then keep <a href="https://docs.databricks.com/aws/en/getting-started/concepts">Databricks components</a> open as a glossary. If you'd rather watch: <a href="https://www.databricks.com/resources/learn/training/databricks-fundamentals">Databricks Fundamentals</a> (free, ~1 hour, 4 videos and a quiz).</div>
+<div class="callout ask"><b>Questions? Ask me.</b> For example: <em>"how is a SQL warehouse different from a BigQuery reservation?"</em>, <em>"what would I need from the customer to connect my app?"</em>, or <em>"what does 'serverless workspace' change for where data lives?"</em></div>
+
+<hr>
+<h2>Appendix: on Sunday (~10 min)</h2>
+<p>In the customer's workspace. Each step only reads metadata, and the queries need a running SQL warehouse for a few seconds.</p>
+<ol>
+  <li><b>Open Catalog</b> in the left sidebar. Write down the catalogs you see. Is there a <code>hive_metastore</code>? Are there schemas named bronze, silver or gold?</li>
+  <li><b>Open Compute → SQL warehouses.</b> For each warehouse, note its type (serverless, pro or classic), size, and auto stop setting.</li>
+  <li><b>Open the SQL editor</b>, pick a warehouse, and run the queries below, one at a time. Swap <code>acme.sales.orders</code> for any table you find in step 1. Click each line marked ● to see what it does.</li>
+</ol>
+<div id="yx-sunday"></div>
+<p><b>Expected:</b> the metastore ID tells you the cloud and region (for example <code>aws:eu-west-1:…</code>). <code>DESCRIBE TABLE EXTENDED</code> shows <code>Type</code> (MANAGED or EXTERNAL), <code>Provider</code> (delta) and <code>Location</code>. Bring what you found, and I'll build Lesson 2 around the customer's real setup.</p>
+<p><b>Don't want to wait until Sunday?</b> <a href="https://www.databricks.com/learn/free-edition">Databricks Free Edition</a> is a free, personal, non-commercial workspace you can use from this machine any day. It's serverless only, with one 2X-Small warehouse. Steps 1-3 work there too, on its sample data.<span class="note"><a href="https://docs.databricks.com/aws/en/getting-started/free-edition-limitations">Free Edition limits</a></span></p>
+
+<div class="next"><span>Databricks · Lesson 1</span><span>Next: what drives the bill, and which compute fits which job →</span></div>
+</main>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/yaml-explain.js"></script>
+<script src="../assets/flow-stepper.js"></script>
+<script>
+YamlExplain.mount(document.getElementById("yx-delta"), `
+SELECT order_date, store_id, SUM(net_amount) AS revenue
+FROM acme.sales.orders
+WHERE order_date >= '2026-10-01'
+GROUP BY ALL;
+
+DESCRIBE HISTORY acme.sales.orders;
+
+SELECT COUNT(*) FROM acme.sales.orders VERSION AS OF 41;
+`, {
+  1: "An ordinary query, just like in BigQuery. It picks <code>order_date</code> and <code>store_id</code>, and adds up <code>net_amount</code> per group with <code>SUM(…)</code>. <code>AS revenue</code> names the result column.",
+  2: "The table's three-part name: catalog <code>acme</code>, schema <code>sales</code>, table <code>orders</code>. No backticks needed, because there are no hyphens. UC turns this name into the files in the customer's storage, and checks that you hold <code>SELECT</code> on it.",
+  3: "Keeps only October 2026 onwards. The string <code>'2026-10-01'</code> is compared to a DATE column. With liquid clustering on <code>order_date</code>, files that can't contain these dates are skipped.",
+  4: "<code>GROUP BY ALL</code> is Databricks SQL shorthand: group by every selected column that isn't an aggregate, here <code>order_date, store_id</code>. The <code>;</code> ends the statement.",
+  6: "<code>DESCRIBE HISTORY</code> lists the table's versions from the transaction log, newest first. Each row has the <code>version</code> number, a <code>timestamp</code>, the <code>operation</code> (WRITE, MERGE, DELETE, OPTIMIZE…) and who ran it (<code>userName</code>). History is kept 30 days by default.",
+  8: "<b>Time travel.</b> <code>VERSION AS OF 41</code> reads the table as it was at version 41, using the old files the log still points to. <code>COUNT(*)</code> counts its rows. <code>TIMESTAMP AS OF '2026-10-24 09:00'</code> works the same way with a time. The default reach is 7 days, because removed data files are deleted after that."
+});
+
+FlowStepper.mount(document.getElementById("flow"), [
+  { title: "Run", who: "Analyst's browser → ① control plane",
+    what: "The SQL editor is a page served by the control plane. The analyst's query is sent there, together with the warehouse they picked in the editor's dropdown.",
+    artifact: "SELECT … FROM acme.sales.orders", ask: "Which warehouse were you attached to?" },
+  { title: "Wake the warehouse", who: "① → ② serverless or ③ classic compute",
+    what: "If the warehouse is stopped, it starts. Serverless starts inside Databricks' account. Pro or classic boots VMs in the customer's account. <b>The DBU meter starts now</b> and runs per second until auto stop.",
+    artifact: "warehouse: analytics-sql · Small · auto stop 10 min", ask: "It was slow because the warehouse was cold." },
+  { title: "Ask Unity Catalog", who: "compute ↔ ① Unity Catalog",
+    what: "UC resolves <code>acme.sales.orders</code> to a storage location, checks the analyst holds <code>SELECT</code>, applies any row filters and column masks, and writes the access to the audit log.",
+    artifact: "PERMISSION_DENIED … does not have SELECT on table", ask: "Did you get the grant in UC?" },
+  { title: "Read the log, then the files", who: "compute ↔ ④ storage",
+    what: "The warehouse reads the table's transaction log to learn which Parquet files make up the current version, then reads only those (and only the columns it needs). Photon does the work.",
+    artifact: "s3://acme-lake/…/orders/_delta_log/  +  part-00042….parquet", ask: "It's all just Parquet in our bucket." },
+  { title: "Results back", who: "compute → ① → browser",
+    what: "Results go back through the control plane to the editor. The files stay where they were, and the warehouse stays up, waiting for the next query.",
+    artifact: "31 rows · 1.8 s", ask: "" },
+  { title: "Idle", who: "② or ③, still running",
+    what: "Nobody queries for 10 minutes, so auto stop shuts the warehouse down. Until then it was billing DBUs (and, for classic, VM costs on the customer's cloud bill), busy or not.",
+    artifact: "warehouse: analytics-sql · Stopped", ask: "Who left the warehouse running all weekend?" }
+], "In the meeting");
+
+YamlExplain.mount(document.getElementById("yx-sunday"), `
+SELECT current_metastore(), current_catalog(), current_schema(), current_user();
+SHOW CATALOGS;
+DESCRIBE TABLE EXTENDED acme.sales.orders;
+DESCRIBE HISTORY acme.sales.orders LIMIT 5;
+`, {
+  1: "Four built-in functions, no table needed. <code>current_metastore()</code> returns the UC metastore ID as <code>&lt;cloud&gt;:&lt;region&gt;:&lt;uuid&gt;</code>, which tells you the cloud and region. <code>current_catalog()</code> and <code>current_schema()</code> show the defaults that unqualified names like <code>orders</code> resolve against. <code>current_user()</code> shows who UC thinks you are.",
+  2: "Lists every catalog you're allowed to see in this metastore. Look for <code>hive_metastore</code> (legacy), <code>system</code> (Databricks' system tables, such as billing and audit), and the customer's own catalogs.",
+  3: "Shows the table's columns and, below them, its details. <code>EXTENDED</code> adds the detail rows: <code>Type</code> (MANAGED or EXTERNAL), <code>Provider</code> (delta), <code>Location</code> (the storage path), <code>Owner</code>, and clustering columns if any.",
+  4: "The last 5 versions from the transaction log, newest first. <code>LIMIT 5</code> keeps it short. Look at <code>operation</code> to see how the table is fed (WRITE, MERGE, STREAMING UPDATE…) and <code>userName</code> to see who or what writes it."
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Databricks Platform Map</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body><main>
+<div class="crumbs">Lessons: <a href="../lessons/0001-the-map-of-the-platform.html">1</a> · Reference: <a href="glossary.html">Glossary</a></div>
+<h1>Platform Map</h1>
+<p class="subtitle">Four boxes, what bills, and every product name you'll hear, old and new. Checked 2026-10-25.</p>
+
+<h2>The four boxes</h2>
+<table>
+<tr><th>Box</th><th>Runs in</th><th>Holds</th><th>Lasts?</th></tr>
+<tr><td>① Control plane</td><td>Databricks' account</td><td>UI, notebooks, SQL editor, Lakeflow Jobs scheduler, <b>Unity Catalog</b></td><td>yes</td></tr>
+<tr><td>② Serverless compute</td><td>Databricks' account</td><td>serverless warehouses, notebooks, jobs, pipelines</td><td>no, starts/stops</td></tr>
+<tr><td>③ Classic compute</td><td>customer's cloud account</td><td>clusters (all-purpose, jobs), pro/classic warehouses</td><td>no, starts/stops</td></tr>
+<tr><td>④ Object storage</td><td>customer's cloud account*</td><td>Delta tables (Parquet + log), volumes</td><td>yes</td></tr>
+</table>
+<p class="note">* A serverless workspace may use Databricks-managed default storage instead. Source: <a href="https://docs.databricks.com/aws/en/getting-started/overview">High-level architecture</a>.</p>
+
+<h2>What bills</h2>
+<pre>DBUs per second while compute runs        # not bytes scanned (unlike BigQuery on-demand)
+classic:    DBUs + VM/disk/network         # VM part on the customer's cloud bill
+serverless: DBUs (VM cost included)        # one bill
+idle warehouse = still billing             # until auto stop: 10 min serverless, 45 pro/classic</pre>
+
+<h2>BigQuery → Databricks</h2>
+<table>
+<tr><th>BigQuery</th><th>Databricks</th><th>Where it breaks</th></tr>
+<tr><td>project.dataset.table</td><td>catalog.schema.table</td><td>a catalog holds no billing or jobs</td></tr>
+<tr><td>IAM + row access policies</td><td>Unity Catalog grants, row filters, column masks</td><td>one place for all of it</td></tr>
+<tr><td>on-demand bytes / slots</td><td>DBUs while a warehouse or cluster is up</td><td>idle compute costs; bytes don't (my analogy)</td></tr>
+<tr><td>scheduled queries, Composer</td><td>Lakeflow Jobs</td><td>runs notebooks, SQL, pipelines, and more</td></tr>
+<tr><td>time travel (7 days)</td><td>Delta time travel (7 days default)</td><td>versions numbered, <code>DESCRIBE HISTORY</code></td></tr>
+<tr><td>partitioning + clustering</td><td>liquid clustering</td><td>replaces both for new tables</td></tr>
+</table>
+<p class="note">Name mappings: <a href="https://www.databricks.com/blog/bigquery-databricks-strategic-framework-modern-migration">Databricks BigQuery migration guide</a>. The cost row is my analogy.</p>
+
+<h2>Names you'll hear</h2>
+<table>
+<tr><th>Old / casual name</th><th>Current name (2026)</th><th>What it is</th></tr>
+<tr><td>Workflows, Databricks Jobs</td><td><a href="https://docs.databricks.com/aws/en/jobs/">Lakeflow Jobs</a></td><td>schedule and orchestrate multi-task workloads</td></tr>
+<tr><td>DLT, Delta Live Tables</td><td><a href="https://docs.databricks.com/aws/en/ldp/where-is-dlt">Lakeflow pipelines</a> (Spark Declarative Pipelines)</td><td>declare tables; the pipeline builds and refreshes them</td></tr>
+<tr><td>Auto Loader, <code>cloudFiles</code></td><td><a href="https://docs.databricks.com/aws/en/ingestion/cloud-object-storage/auto-loader/">Auto Loader</a></td><td>load new files as they land in storage</td></tr>
+<tr><td>DBSQL</td><td><a href="https://docs.databricks.com/aws/en/sql/">Databricks SQL</a></td><td>the warehouse side: SQL editor, warehouses, dashboards</td></tr>
+<tr><td>dashboards</td><td><a href="https://docs.databricks.com/aws/en/dashboards/">AI/BI dashboards</a></td><td>built-in BI dashboards</td></tr>
+<tr><td>Genie space</td><td><a href="https://docs.databricks.com/aws/en/genie-agents/">Genie Agents</a></td><td>plain-English questions over chosen tables</td></tr>
+<tr><td>Databricks One</td><td><a href="https://docs.databricks.com/aws/en/genie-one/">Genie One</a></td><td>simplified UI for business users</td></tr>
+<tr><td>Databricks Assistant</td><td><a href="https://docs.databricks.com/aws/en/genie-code/">Genie Code</a></td><td>AI help in notebooks and the editor</td></tr>
+<tr><td>Vector Search, Mosaic AI Vector Search</td><td><a href="https://docs.databricks.com/aws/en/ai-search/ai-search">Databricks AI Search</a></td><td>similarity search over embeddings</td></tr>
+<tr><td>Model Serving, Mosaic AI</td><td><a href="https://docs.databricks.com/aws/en/machine-learning/model-serving/">Model Serving</a></td><td>deploy, govern and query AI models</td></tr>
+<tr><td>MLflow</td><td><a href="https://docs.databricks.com/aws/en/mlflow/">MLflow</a></td><td>experiments, models, evaluation, deployment</td></tr>
+<tr><td>Delta Sharing</td><td><a href="https://docs.databricks.com/aws/en/delta-sharing/">OpenSharing</a></td><td>share data with other organizations</td></tr>
+<tr><td>Apps</td><td><a href="https://docs.databricks.com/aws/en/dev-tools/databricks-apps/">Databricks Apps</a></td><td>host data/AI apps inside the platform</td></tr>
+<tr><td>DBFS, mounts</td><td>deprecated → <a href="https://docs.databricks.com/aws/en/volumes/">volumes</a></td><td>old file access; replaced by UC volumes</td></tr>
+</table>
+
+<h2>First SQL to run in a new workspace</h2>
+<pre>SELECT current_metastore(), current_user();   -- cloud:region:id of the metastore; who UC thinks you are
+SHOW CATALOGS;                                 -- hive_metastore = legacy; system = billing/audit tables
+DESCRIBE TABLE EXTENDED cat.schema.tbl;        -- Type MANAGED/EXTERNAL, Provider delta, Location
+DESCRIBE HISTORY cat.schema.tbl LIMIT 5;       -- last 5 versions: who wrote what, and how</pre>
+</main></body>
+</html>
