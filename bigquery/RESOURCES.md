@@ -32,6 +32,10 @@ Google moved the docs to `docs.cloud.google.com`; old `cloud.google.com/bigquery
   Side channels, hidden stats, no write access for filtered users, no pruning on policy filters, the two-policy pattern. Use for: answering the customer's security team.
 - [Docs: Authorized views](https://docs.cloud.google.com/bigquery/docs/authorized-views)
   Separate dataset, authorize the view on the source, same region, authorized datasets. Use for: sharing row and column subsets.
+- [Docs: Authorized datasets](https://docs.cloud.google.com/bigquery/docs/authorized-datasets)
+  "All current and future views in an authorized dataset have access to the tables in the shared dataset"; permissions to create views there; 2,500 authorized resources limit. Use for: the customer's `hr_views` design.
+- [Docs: Cached query results](https://docs.cloud.google.com/bigquery/docs/cached-results)
+  Not cached: non-deterministic functions incl. `SESSION_USER()`, row-level-secured tables, destination tables; cache is per user, per project. Use for: why secured dashboards cost on every refresh.
 - [Docs: Security functions (SESSION_USER)](https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/security_functions)
   "Returns the email address of the user that's running the query." Use for: the one-service-account trap.
 - [DoiT: Multi-tenant security in BigQuery via your BI tool](https://www.doit.com/blog/implementing-multi-tenant-security-transparently-and-effectively-in-bigquery-via-your-preferred-bi)
