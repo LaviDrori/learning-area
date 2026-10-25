@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BigQuery Glossary</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body><main>
+<div class="crumbs">Lessons: <a href="../lessons/0001-what-a-query-is-billed-for.html">1</a> · Reference: <a href="query-cost.html">Query cost</a></div>
+<h1>Glossary</h1>
+<p class="subtitle">The course's single source of truth for terms. Lessons use these words exactly as defined here. Definitions are quoted or adapted from Google Cloud's BigQuery docs.</p>
+
+<h2>Paying for queries</h2>
+<table>
+<tr><th>Term</th><th>Meaning</th><th>From</th></tr>
+<tr><td><b>On-demand pricing</b></td><td>Pay per TiB of data a query processes. The first 1 TiB per month per billing account is free.</td><td><a href="https://cloud.google.com/bigquery/pricing">pricing</a> · L1</td></tr>
+<tr><td><b>Capacity pricing / editions</b></td><td>Pay for slots per hour (Standard, Enterprise, Enterprise Plus), reserved or autoscaled. Bytes stop being the bill.</td><td><a href="https://cloud.google.com/bigquery/pricing">pricing</a> · L1</td></tr>
+<tr><td><b>Slot</b></td><td>A unit of BigQuery compute. Capacity customers buy slots; on-demand queries use shared ones.</td><td><a href="https://cloud.google.com/bigquery/pricing">pricing</a> · L1</td></tr>
+<tr><td><b>Bytes processed / bytes billed</b></td><td>Processed: logical bytes read from the referenced columns. Billed: processed, rounded up to the MB, minimum 10 MB per referenced table.</td><td><a href="https://cloud.google.com/bigquery/pricing">pricing</a> · L1</td></tr>
+<tr><td><b>Logical bytes</b></td><td>Uncompressed size. On-demand query cost always uses logical bytes.</td><td><a href="https://docs.cloud.google.com/bigquery/docs/estimate-costs">docs</a> · L1</td></tr>
+<tr><td><b>Billing project</b></td><td>The project a job runs in. It pays for the query, whoever owns the data.</td><td><a href="https://docs.cloud.google.com/bigquery/docs/jobs-overview">docs</a> · L1</td></tr>
+<tr><td><b>Job</b></td><td>One unit of work BigQuery runs for you: query, load, extract or copy. History is in <code>INFORMATION_SCHEMA.JOBS</code> (180 days).</td><td><a href="https://docs.cloud.google.com/bigquery/docs/information-schema-jobs">docs</a> · L1</td></tr>
+<tr><td><b>Query cache</b></td><td>Stored results of a previous identical query on unchanged tables. Cached answers are free (<code>cache_hit</code> in the job history).</td><td><a href="https://cloud.google.com/bigquery/pricing">pricing</a> · L1</td></tr>
+<tr><td><b>Dry run</b></td><td>Validate a query and estimate its bytes without reading data. Free. An upper bound. Returns 0 on row-level-secured tables.</td><td><a href="https://docs.cloud.google.com/bigquery/docs/best-practices-costs">docs</a> · L1</td></tr>
+<tr><td><b>Query validator</b></td><td>The console's live dry run: "This query will process … when run".</td><td><a href="https://docs.cloud.google.com/bigquery/docs/best-practices-costs">docs</a> · L1</td></tr>
+<tr><td><b>Maximum bytes billed</b></td><td>Per-query cap. If the estimate exceeds it, the query fails without a charge.</td><td><a href="https://docs.cloud.google.com/bigquery/docs/best-practices-costs">docs</a> · L1</td></tr>
+</table>
+
+<h2>Table design</h2>
+<table>
+<tr><th>Term</th><th>Meaning</th><th>From</th></tr>
+<tr><td><b>Columnar storage</b></td><td>"Stores each column separately", so a query reads only the columns it names.</td><td><a href="https://docs.cloud.google.com/bigquery/docs/storage_overview">docs</a> · L1</td></tr>
+<tr><td><b>Partition</b></td><td>A slice of a table's rows, by a DATE/TIMESTAMP/DATETIME column, ingestion time, or integer range.</td><td><a href="https://docs.cloud.google.com/bigquery/docs/partitioned-tables">docs</a> · L1</td></tr>
+<tr><td><b>Partition pruning</b></td><td>Skipping partitions the WHERE clause rules out before reading. Needs a constant filter on the partitioning column.</td><td><a href="https://docs.cloud.google.com/bigquery/docs/querying-partitioned-tables">docs</a> · L1</td></tr>
+<tr><td><b>require_partition_filter</b></td><td>Table option: queries without a pruning filter on the partitioning column fail.</td><td><a href="https://docs.cloud.google.com/bigquery/docs/querying-partitioned-tables">docs</a> · L1</td></tr>
+<tr><td><b>Clustering</b></td><td>Rows sorted into blocks by up to four columns. Order matters: the first column takes precedence.</td><td><a href="https://docs.cloud.google.com/bigquery/docs/clustered-tables">docs</a> · L1</td></tr>
+<tr><td><b>Block pruning</b></td><td>Skipping blocks of a clustered table that the filter rules out. Happens at run time, so dry runs can't show it.</td><td><a href="https://docs.cloud.google.com/bigquery/docs/clustered-tables">docs</a> · L1</td></tr>
+</table>
+</main></body>
+</html>

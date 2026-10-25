@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>What a Query Is Billed For</title>
+<link rel="stylesheet" href="../assets/course.css">
+<style>
+  .grid svg text { font-family: var(--mono); font-size: 11px; fill: var(--fg); }
+  .grid svg .muted { fill: var(--muted); }
+  .grid svg .cell { fill: var(--panel); stroke: var(--rule); stroke-width: 1; }
+  .grid svg .line { stroke: var(--rule); stroke-width: 1; }
+  .grid svg .hit { fill: var(--accent); fill-opacity: .55; }
+  .grid svg .colhit { fill: var(--accent); fill-opacity: .12; }
+  .story { border-left: 3px solid var(--rule); padding-left: 1rem; margin: 1rem 0; }
+</style>
+</head>
+<body><main>
+<div class="crumbs">BigQuery · Lesson 1 · <a href="../reference/glossary.html">Glossary</a> · <a href="../reference/query-cost.html">Query cost cheat sheet</a></div>
+
+<h1>What a Query Is Billed For</h1>
+<p class="subtitle">Columns, partitions, clusters, and the two lines of Python that cap your app's bill. ~25 minutes.</p>
+
+<div class="goal"><strong>Your win today:</strong> predict what a dry run will say for a query on the customer's <code>orders</code> table <em>before</em> running it, find the three lines that make your app's nightly query scan the whole table, and add a hard cost cap to <code>forecast-app</code>.</div>
+
+<h2>0. Predict first <span class="score"></span></h2>
+<p>Guess even if you're unsure. A wrong guess now makes the right answer stick better later.</p>
+<div class="quiz" data-answer="0">
+  <p class="q">The customer's <code>acme-dw.sales.orders</code> is about 2 TB and <em>not</em> clustered. You run <code>SELECT * … LIMIT 10</code>. On-demand, you're billed for…</p>
+  <button>the whole table, about 2 TB</button>
+  <button>ten rows' worth, a few KB</button>
+  <button>nothing, since LIMIT is free</button>
+  <p class="why">"For non-clustered tables, applying a <code>LIMIT</code> clause to a query doesn't affect the amount of data that is read." LIMIT trims the <em>output</em> after the scan. The free way to peek at rows is the console's Preview tab (or <code>bq head</code>), which shows data "at no charge".<span class="note"><a href="https://docs.cloud.google.com/bigquery/docs/best-practices-costs">Control costs in BigQuery</a></span></p>
+</div>
+<div class="quiz" data-answer="1">
+  <p class="q"><code>forecast-app</code> runs its jobs in your project <code>forecast-app-prod</code> and reads the customer's <code>acme-dw.sales.orders</code>. On-demand, who pays for the query?</p>
+  <button>acme-dw, the project that owns the data</button>
+  <button>forecast-app-prod, the project running the job</button>
+  <button>both projects, split evenly between them</button>
+  <p class="why">"When running a query job, the cost is billed to the project that runs the job." The data's owner pays to <em>store</em> it; whoever runs the job pays to <em>query</em> it. This is the <b>billing project</b>, and it's why your cost habits are your bill, not only the customer's.<span class="note"><a href="https://docs.cloud.google.com/bigquery/docs/jobs-overview">Introduction to BigQuery jobs</a></span></p>
+</div>
+
+<h2>1. Two ways to pay</h2>
+<p>Before talking cost with the customer, ask which pricing model their projects use. BigQuery has two:<span class="note"><a href="https://cloud.google.com/bigquery/pricing">BigQuery pricing</a></span></p>
+<table>
+<tr><th>Model</th><th>You pay for</th><th>What "expensive" means</th></tr>
+<tr><td><b>On-demand</b></td><td>bytes processed, per TiB</td><td>a query that <em>reads</em> a lot</td></tr>
+<tr><td><b>Capacity</b> (editions: Standard, Enterprise, Enterprise Plus)</td><td><b>slots</b> (units of compute) per hour, reserved or autoscaled</td><td>a query that keeps many slots busy, slowing everyone else on the reservation</td></tr>
+</table>
+<p>This lesson uses on-demand, where the rules are crisp. Under capacity, bytes stop being the bill, but reading less is still less work for the customer's slots, so the same habits pay off.</p>
+<p>On-demand facts worth knowing by heart (check the pricing page for today's numbers):<span class="note"><a href="https://cloud.google.com/bigquery/pricing">Pricing</a> · <a href="https://docs.cloud.google.com/bigquery/docs/estimate-costs">Estimate costs</a></span></p>
+<ul>
+  <li><b>$6.25 per TiB</b> processed (US multi-region), after the first <b>1 TiB per month free</b> for each billing account.</li>
+  <li>Counted in <b>logical</b> (uncompressed) bytes, not the compressed size on disk.</li>
+  <li>Rounded up to the nearest MB, with a <b>10 MB minimum per table referenced</b>. A tiny lookup still costs 10 MB.</li>
+  <li><b>Free:</b> queries that return an error, and queries answered from the <b>query cache</b>.</li>
+</ul>
+
+<h2>2. The scan is columns × partitions</h2>
+<p>"BigQuery stores table data in columnar format, meaning it stores each column separately", so it "can read that column data without reading every field of every row".<span class="note"><a href="https://docs.cloud.google.com/bigquery/docs/storage_overview">Storage overview</a></span> A <b>partitioned</b> table is also split into row slices, here one per day of <code>order_date</code>. A query reads only the slices its <code>WHERE</code> clause lets it reach. Skipping slices is called <b>partition pruning</b>.<span class="note"><a href="https://docs.cloud.google.com/bigquery/docs/partitioned-tables">Partitioned tables</a></span></p>
+<figure class="grid">
+<svg viewBox="0 0 620 230" role="img" aria-label="A grid of the orders table. Columns order_id, order_date, store_id, product_id, quantity, basket_json run across; daily partitions from 2023-10-26 to 2026-10-25 run down. Only the cells where four picked columns meet the 2026-10-24 partition are highlighted.">
+  <rect class="colhit" x="190" y="40" width="320" height="160"/>
+  <rect x="110" y="40" width="480" height="160" fill="none" class="line"/>
+  <line class="line" x1="190" y1="40" x2="190" y2="200"/><line class="line" x1="270" y1="40" x2="270" y2="200"/>
+  <line class="line" x1="350" y1="40" x2="350" y2="200"/><line class="line" x1="430" y1="40" x2="430" y2="200"/>
+  <line class="line" x1="510" y1="40" x2="510" y2="200"/>
+  <line class="line" x1="110" y1="60" x2="590" y2="60"/><line class="line" x1="110" y1="80" x2="590" y2="80"/>
+  <line class="line" x1="110" y1="160" x2="590" y2="160"/><line class="line" x1="110" y1="180" x2="590" y2="180"/>
+  <rect class="hit" x="190" y="160" width="320" height="20"/>
+  <text x="150" y="32" text-anchor="middle">order_id</text>
+  <text x="230" y="32" text-anchor="middle">order_date</text>
+  <text x="310" y="32" text-anchor="middle">store_id</text>
+  <text x="390" y="32" text-anchor="middle">product_id</text>
+  <text x="470" y="32" text-anchor="middle">quantity</text>
+  <text x="550" y="32" text-anchor="middle">basket_json</text>
+  <text x="102" y="54" text-anchor="end">2023-10-26</text>
+  <text x="102" y="74" text-anchor="end">2023-10-27</text>
+  <text x="102" y="124" text-anchor="end" class="muted">⋮ 1,092 more</text>
+  <text x="102" y="174" text-anchor="end">2026-10-24</text>
+  <text x="102" y="194" text-anchor="end">2026-10-25</text>
+  <text x="350" y="222" text-anchor="middle" class="muted">Billed = picked columns (shaded) × kept partitions (rows). Only the dark cells are read.</text>
+</svg>
+<figcaption><code>SELECT order_date, store_id, product_id, quantity … WHERE order_date = '2026-10-24'</code> reads one day of four small columns. <code>SELECT *</code> with no filter reads the whole grid.</figcaption>
+</figure>
+<p>Try it on the customer's table. Its real column sizes are below (~3.1 billion rows). Every number is what a <b>dry run</b> would report before you run anything.</p>
+<ol>
+  <li>Untick <code>basket_json</code> and <code>notes</code>. How much of the bill were they?</li>
+  <li>Pick the <code>order_date &gt;= '2026-10-18'</code> filter.</li>
+  <li>Now pick the <code>EXTRACT(MONTH …)</code> filter. Same column, so why is it back to full size?</li>
+  <li>Try <code>store_id = 42</code>, then the <code>AND</code> and <code>OR</code> versions.</li>
+</ol>
+<div id="scan"></div>
+
+<h2>3. What prunes, and what quietly doesn't</h2>
+<p>Pruning works when BigQuery can tell <em>before reading</em> which partitions might match. Google's list:<span class="note"><a href="https://docs.cloud.google.com/bigquery/docs/querying-partitioned-tables">Querying partitioned tables</a></span></p>
+<table>
+<tr><th>Prunes ✓</th><th>Scans everything ✗</th></tr>
+<tr><td><code>order_date = '2026-10-24'</code><br><code>order_date BETWEEN '2026-10-01' AND '2026-10-31'</code></td><td><code>EXTRACT(MONTH FROM order_date) = 10</code> (unsupported function)</td></tr>
+<tr><td><code>DATE(ts) = '2025-03-30'</code>, <code>TIMESTAMP_TRUNC(ts, MONTH) &gt;= …</code> (supported functions with constant arguments)</td><td><code>ts + INTERVAL 1 DAY &gt; CURRENT_TIMESTAMP()</code> (arithmetic on the column; move it to the other side)</td></tr>
+<tr><td>a partition filter <code>AND</code> any other filter</td><td>a partition filter <code>OR</code> another filter</td></tr>
+<tr><td></td><td><code>order_date = (SELECT MAX(run_date) FROM …)</code> (value from a subquery)</td></tr>
+</table>
+<p>"Other functions and complex mathematical operations will require a full table scan." The dry run tells you which one you wrote. To make the mistake impossible, a table can set <code>require_partition_filter = TRUE</code>. Then a query without a usable partition filter fails with <em>"Cannot query over table … without a filter that can be used for partition elimination"</em>, and failed queries are free.</p>
+
+<h2>4. Clustering: pruning inside a partition</h2>
+<p>A <b>clustered</b> table keeps rows sorted by up to <b>four</b> columns, stored in blocks. "When a block is pruned, it is not scanned." So a filter on <code>store_id</code> skips blocks of other stores.<span class="note"><a href="https://docs.cloud.google.com/bigquery/docs/clustered-tables">Clustered tables</a></span> Three things to know:</p>
+<ul>
+  <li><b>Order matters.</b> The first clustering column takes precedence. Filtering on <code>product_id</code> alone gets less benefit than filtering on <code>store_id</code>.</li>
+  <li><b>The estimate can't see it.</b> Which blocks get skipped is only known while the query runs, so the dry run is an <b>upper bound</b>. The real bill is often lower.</li>
+  <li><b>When to pick which.</b> Google calls clustering "generally a good first option" (tables over 64 MB benefit). Add partitioning when you need a strict estimate before running, when partitions would average at least 10 GB, or for per-partition storage pricing.</li>
+</ul>
+<p>Partition <em>and</em> cluster, as the customer's <code>orders</code> does: partitions are cut first, then clustering sorts rows within each one.</p>
+
+<h2>5. Design the table you write back</h2>
+<p><code>forecast-app</code> writes daily predictions into the customer's project, and their dashboards read them by date and store. Here's the table you'd create. Click each line marked ●.</p>
+<div id="yx-ddl"></div>
+
+<h2>6. Cap your app's bill</h2>
+<p>Your app can ask for an estimate (dry run) and set a hard cap (<b>maximum bytes billed</b>) on every job: "If the number of estimated bytes is beyond the limit, then the query fails without incurring a charge."<span class="note"><a href="https://docs.cloud.google.com/bigquery/docs/best-practices-costs">Control costs</a> · <a href="https://docs.cloud.google.com/bigquery/docs/samples/bigquery-query-dry-run">Dry-run sample</a></span></p>
+<div id="yx-py"></div>
+<div class="callout"><b>Two catches.</b> ① The cap checks the <em>estimate</em>, so on clustered tables a query can fail even though its real bill would have fit. Leave headroom. ② On tables protected by row-level security, "dry runs always return 0 bytes". Your printed estimate goes blind there. That's <a href="#next">Lesson 2</a>'s topic.</div>
+
+<h2>7. Spot the line</h2>
+<p>This is <code>forecast-app</code>'s nightly feature pull. It needs one day of four columns, yet it costs about $13 a night. Each symptom assumes the previous one is fixed. Click the guilty line.</p>
+<div id="spot"></div>
+
+<h2>8. Day-to-day stories</h2>
+<div class="story">
+<h3>Story A: the AI assistant's first bill</h3>
+<p><code>forecast-app</code>'s assistant turns a user's question into SQL. A store manager pins its answer to a dashboard that refreshes every 15 minutes, and the generated SQL is <code>SELECT * FROM orders</code> with a <code>LIMIT</code>. That's 2.18 TB × 96 runs a day, about <b>$1,300 a day</b> in your billing project. The fix is one line: every job the assistant runs gets <code>maximum_bytes_billed</code>. Above it, the user gets "this question would scan too much, add a date range" instead of a bill.</p>
+</div>
+<div class="story">
+<h3>Story B: the dashboard that forgot the date</h3>
+<p>The customer's analyst builds a Tableau sheet on your <code>forecast.predictions</code> table, filtering only on store. Because you set <code>require_partition_filter</code>, the sheet errors at once with "without a filter that can be used for partition elimination". They add a date filter, and every refresh now reads a few days of one store's blocks instead of years of history. Your table design taught their dashboard good habits.</p>
+</div>
+<div class="story">
+<h3>Story C: "we're on Enterprise, bytes don't matter"</h3>
+<p>The customer's platform team says their projects run on an Enterprise edition reservation. Now nobody is billed per byte, <code>total_bytes_billed</code> in their job history is informational only, and the cap in your code stops being a money guard.<span class="note"><a href="https://docs.cloud.google.com/bigquery/docs/information-schema-jobs">JOBS view</a></span> But a full scan still occupies their slots and slows everyone else's queries. So your answer is: "We still prune and select only the columns we need. Here are our jobs' slot times if you want to check."</p>
+</div>
+
+<hr>
+<h2>9. A customer asks… <span class="score"></span></h2>
+<div class="quiz" data-answer="2">
+  <p class="q">A dashboard filters <code>EXTRACT(MONTH FROM order_date) = 10 AND EXTRACT(YEAR FROM order_date) = 2026</code> and scans all three years. Best fix?</p>
+  <button>add LIMIT 1000 to the end of the query</button>
+  <button>also cluster the table on order_date</button>
+  <button>filter order_date between two literal dates</button>
+  <p class="why"><code>EXTRACT(MONTH …)</code> is on the "scans everything" list, and the <code>AND</code> can't rescue it, because neither side is a pruning filter. <code>order_date BETWEEN '2026-10-01' AND '2026-10-31'</code> is a constant range on the partitioning column. LIMIT doesn't shrink the scan, and clustering never shrinks the dry-run estimate, so the dashboard's cost would still look like three years.</p>
+</div>
+<div class="quiz" data-answer="0">
+  <p class="q">Your job has <code>maximum_bytes_billed</code> = 10 GB. On a clustered table, the dry run estimates 14 GB, but block pruning would have made it 6 GB. What happens?</p>
+  <button>it fails before running, and costs nothing</button>
+  <button>it runs, since the real bytes fit the cap</button>
+  <button>it runs and bills the full 14 GB estimate</button>
+  <p class="why">The cap is checked against the estimate, which is an upper bound. "On clustered tables, a query can fail even when actual billed bytes would stay under the limit." Leave headroom, or add a partition filter so the estimate itself shrinks.</p>
+</div>
+<div class="quiz" data-answer="1">
+  <p class="q">The customer's analyst reruns an identical report query five minutes later, and the table hasn't changed. On-demand, the second run costs…</p>
+  <button>the same as the first run did</button>
+  <button>nothing, if served from the cache</button>
+  <button>half, due to a cache discount</button>
+  <p class="why">Queries answered from the query cache aren't charged. You can see it per job in the <code>cache_hit</code> column of <code>INFORMATION_SCHEMA.JOBS</code>. Your dry-run code sets <code>use_query_cache=False</code> so the estimate shows the full, uncached cost.</p>
+</div>
+<div class="quiz" data-answer="2">
+  <p class="q">You're designing a new 30 GB <code>events</code> table. Queries mostly filter on <code>user_id</code> over any date range. Best first choice?</p>
+  <button>partition by an integer user_id range</button>
+  <button>partition by day into ~80 MB slices</button>
+  <button>cluster by user_id; partition only later</button>
+  <p class="why">Google calls clustering "generally a good first option", and suggests adding partitioning when partitions would average at least 10 GB. Daily slices of this table would be tiny, and integer-range partitioning on an ID gives you no pruning on date-range queries.</p>
+</div>
+<div class="quiz" data-answer="0">
+  <p class="q">Your <code>forecast.predictions</code> table has <code>require_partition_filter = TRUE</code>. An analyst runs <code>SELECT * … WHERE store_id = 42</code>. Result?</p>
+  <button>an error asking for a partition filter</button>
+  <button>a full scan, billed at the usual rate</button>
+  <button>rows from only the newest partition</button>
+  <p class="why"><code>store_id</code> is a clustering column, not the partitioning column, so the query has no "filter that can be used for partition elimination" and fails at once. Errors are free. This is Story B.</p>
+</div>
+
+<hr>
+<div class="callout source"><b>Primary source, read this next (~15 min):</b> <a href="https://docs.cloud.google.com/bigquery/docs/best-practices-costs">Google Cloud, Control costs in BigQuery</a>. Then skim the "Prune partitions" section of <a href="https://docs.cloud.google.com/bigquery/docs/querying-partitioned-tables">Querying partitioned tables</a>, which has the full list of functions that keep pruning working.</div>
+<div class="callout ask"><b>Questions? Ask me.</b> For example: <em>"how would I find which dashboards drive the customer's bill?"</em>, <em>"should the predictions table be partitioned by month instead?"</em>, or <em>"how do query parameters interact with pruning?"</em></div>
+
+<hr>
+<h2>Appendix: on your next office day (Tue/Wed, ~10 min)</h2>
+<p>In the BigQuery console on your work account. Nothing here costs more than a few MB.</p>
+<ol>
+  <li><b>Find your most expensive queries.</b> Paste this into a new query tab. Change <code>region-us</code> to the region your datasets live in (for example <code>region-eu</code>). Click a line marked ● to see what each part means.</li>
+</ol>
+<div id="yx-jobs"></div>
+<ol start="2">
+  <li><b>Read the validator before you run.</b> Open the top result's query in a new tab, but don't run it. The top-right corner shows <em>"This query will process … when run"</em>: that's the dry run. Remove columns and add a date filter, and watch the number change.</li>
+  <li><b>Check for clustering.</b> In the Explorer, open the table that query used and look at its Details tab for the partitioning and clustering fields. Predict which of your filters prune before you look.</li>
+</ol>
+<p><b>Expected:</b> tiny queries show 10 MB billed (the per-table minimum). If <code>gb_billed</code> is empty for every row, your project is on capacity pricing (Story C). Tell me what you found next session, and I'll use it in Lesson 2.</p>
+
+<div class="next" id="next"><span>BigQuery · Lesson 1</span><span>Next: row-level security, each user sees only their own rows →</span></div>
+</main>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/scan-sim.js"></script>
+<script src="../assets/yaml-explain.js"></script>
+<script src="../assets/spot-line.js"></script>
+<script>
+const WEEK = 8 / 1096;   // 2026-10-18 .. 2026-10-25 out of 1,096 daily partitions
+ScanSim.mount(document.getElementById("scan"), {
+  table: "acme-dw.sales.orders",
+  pricePerTiB: 6.25,
+  columns: [
+    { name: "order_id", gb: 120 }, { name: "order_date", gb: 25 }, { name: "store_id", gb: 25 },
+    { name: "product_id", gb: 25 }, { name: "customer_id", gb: 110 }, { name: "quantity", gb: 25 },
+    { name: "net_amount", gb: 50 }, { name: "currency", gb: 10 }, { name: "channel", gb: 15 },
+    { name: "basket_json", gb: 1500 }, { name: "notes", gb: 300 }, { name: "updated_at", gb: 25 }
+  ],
+  filters: [
+    { sql: "-- no WHERE clause", fraction: 1, note: "Every one of the 1,096 daily partitions is read, for every picked column." },
+    { sql: "WHERE order_date >= '2026-10-18'", fraction: WEEK, note: "A constant comparison on the partitioning column. Only 8 daily partitions (Oct 18-25) are read: <b>partition pruning</b>." },
+    { sql: "WHERE EXTRACT(MONTH FROM order_date) = 10", fraction: 1, note: "Same column, but <code>EXTRACT(MONTH …)</code> is not one of the functions BigQuery can prune through, so every partition is read. Rewrite it as a date range." },
+    { sql: "WHERE store_id = 42", fraction: 1, note: "<code>store_id</code> is the first clustering column. The dry run still shows full size because the estimate is an upper bound. The real bill after the run will be far lower, thanks to block pruning." },
+    { sql: "WHERE order_date >= '2026-10-18' AND store_id = 42", fraction: WEEK, note: "Partitions are pruned first (the estimate shows it), then clustering skips other stores' blocks inside those 8 days (the real bill shows it)." },
+    { sql: "WHERE order_date >= '2026-10-18' OR store_id = 42", fraction: 1, note: "<code>OR</code> lets in store 42's rows from <em>any</em> date, so no partition can be ruled out. Full scan." },
+    { sql: "-- no WHERE clause ... LIMIT 10", fraction: 1, note: "LIMIT cuts the output, not the scan. On clustered tables it <em>can</em> stop reading early, but the estimate never shows that." }
+  ]
+});
+
+YamlExplain.mount(document.getElementById("yx-ddl"), `
+CREATE TABLE \`acme-dw.forecast.predictions\`
+(
+  forecast_date  DATE,
+  store_id       INT64,
+  product_id     INT64,
+  predicted_qty  FLOAT64,
+  model_version  STRING
+)
+PARTITION BY forecast_date
+CLUSTER BY store_id, product_id
+OPTIONS (require_partition_filter = TRUE);
+`, {
+  1: "<code>CREATE TABLE</code> makes a new, empty table and fails if one already exists (<code>CREATE OR REPLACE TABLE</code> would overwrite it). The name is <code>project.dataset.table</code>: project <code>acme-dw</code> (the customer's), dataset <code>forecast</code> (a container you were given for your app's output), table <code>predictions</code>. Backticks are required because the project ID has a hyphen.",
+  2: "Opens the column list.",
+  3: "<code>forecast_date DATE</code>: the day a prediction is <em>for</em>. A <code>DATE</code> column can be the partitioning column, with daily, monthly or yearly partitions.",
+  4: "<code>store_id INT64</code>: 64-bit integer store key. Same type as in <code>sales.orders</code>, so joins between them don't need casts.",
+  5: "<code>product_id INT64</code>: the product key, also matching <code>sales.orders</code>.",
+  6: "<code>predicted_qty FLOAT64</code>: the model's predicted units sold, as a double-precision float (8 bytes per value).",
+  7: "<code>model_version STRING</code>: which model produced the row, such as <code>'v12'</code>, so you can compare versions or roll back. No trailing comma: it's the last column.",
+  9: "<code>PARTITION BY forecast_date</code>: one partition per day of <code>forecast_date</code> (daily is the default granularity). Queries filtering on it read only those days.",
+  10: "<code>CLUSTER BY store_id, product_id</code>: inside each day, rows are sorted by store, then by product. Dashboards filter on store first, so it goes first. Up to four columns are allowed, and order matters.",
+  11: "<code>OPTIONS (…)</code> sets table properties. <code>require_partition_filter = TRUE</code> makes every query against this table fail unless its <code>WHERE</code> clause has a filter on <code>forecast_date</code> that can prune partitions. A forgotten date filter becomes a free error instead of a full scan. The final <code>;</code> ends the statement."
+});
+
+YamlExplain.mount(document.getElementById("yx-py"), `
+from google.cloud import bigquery
+
+client = bigquery.Client(project="forecast-app-prod")
+sql = """
+SELECT order_date, store_id, product_id, quantity
+FROM \`acme-dw.sales.orders\`
+WHERE order_date = '2026-10-24'
+"""
+
+dry_cfg = bigquery.QueryJobConfig(dry_run=True, use_query_cache=False)
+dry = client.query(sql, job_config=dry_cfg)
+print(f"Will process {dry.total_bytes_processed / 1024**3:.2f} GB")
+
+cap_cfg = bigquery.QueryJobConfig(maximum_bytes_billed=50 * 1024**3)
+rows = client.query(sql, job_config=cap_cfg).result()
+`, {
+  1: "Imports Google's official Python client (<code>pip install google-cloud-bigquery</code>).",
+  3: "Creates a client. <code>project=\"forecast-app-prod\"</code> is the project the jobs run in, so it's the <b>billing project</b>: on-demand, that project pays, not <code>acme-dw</code>. Credentials come from the environment (your service account).",
+  4: "Starts a multi-line Python string holding the SQL.",
+  5: "Picks only the 4 columns the model needs. Each extra column adds its full size to the bill.",
+  6: "The customer's table, fully qualified as <code>project.dataset.table</code>. Your service account needs read access to it, and permission to run jobs in <code>forecast-app-prod</code>.",
+  7: "A constant comparison on the partitioning column, so only the 2026-10-24 partition is read. (In real code, build the date in Python rather than hard-coding it. Don't move it into a subquery: subqueries don't prune.)",
+  8: "Ends the SQL string.",
+  10: "A job config for an estimate only. <code>dry_run=True</code>: validate and estimate, read nothing, cost nothing. <code>use_query_cache=False</code>: estimate the full, uncached cost rather than \"0, it's cached\".",
+  11: "Sends the dry run. It \"completes immediately\" and returns a job object holding the estimate.",
+  12: "<code>total_bytes_processed</code> is the estimate in bytes. <code>/ 1024**3</code> converts to GB (1024³ bytes), and <code>:.2f</code> prints 2 decimals. Here it's about 0.09 GB: 4 small columns × 1 of 1,096 days. On a row-level-secured table this reads 0.",
+  14: "A second config for the real run. <code>maximum_bytes_billed=50 * 1024**3</code> is a cap of 50 GB, in bytes. If the estimate exceeds it, the job fails <em>without a charge</em>. Pick a cap well above the normal run (~0.09 GB here) but far below a full scan (2.18 TB).",
+  15: "Runs the query for real with the cap. <code>.result()</code> waits for it to finish and returns an iterator of rows. If the cap is exceeded, this raises an exception instead, so catch it and log it."
+});
+
+YamlExplain.mount(document.getElementById("yx-jobs"), `
+SELECT
+  creation_time,
+  total_bytes_billed / POW(1024, 3) AS gb_billed,
+  LEFT(query, 120) AS query_start
+FROM \`region-us\`.INFORMATION_SCHEMA.JOBS_BY_USER
+WHERE creation_time >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 30 DAY)
+  AND job_type = 'QUERY'
+ORDER BY total_bytes_billed DESC
+LIMIT 5;
+`, {
+  1: "Starts the column list.",
+  2: "<code>creation_time</code>: when each job was created (UTC). Tells you if an expensive query is a one-off or runs every night.",
+  3: "<code>total_bytes_billed</code> is what each job was billed for, in bytes (empty under capacity pricing). <code>POW(1024, 3)</code> is 1024³, so dividing converts to GB. <code>AS gb_billed</code> names the result column.",
+  4: "<code>LEFT(query, 120)</code>: the first 120 characters of the SQL text, enough to recognise it. <code>AS query_start</code> names the column.",
+  5: "Reads job history. <code>JOBS_BY_USER</code> shows only jobs <em>you</em> ran, so it needs no admin rights. <code>`region-us`</code> is the region qualifier and must match where your data and jobs live. History covers the last 180 days.",
+  6: "Only jobs from the last 30 days. <code>TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 30 DAY)</code> means \"now minus 30 days\". The view is partitioned on <code>creation_time</code>, so this filter keeps the query itself cheap.",
+  7: "<code>job_type = 'QUERY'</code> drops load, copy and extract jobs, which aren't billed like queries.",
+  8: "Most expensive first. <code>DESC</code> means descending.",
+  9: "Only the top 5 rows. (Here LIMIT is fine: the view is small, and you want five rows, not to save bytes.) <code>;</code> ends the statement."
+});
+
+SpotLine.mount(document.getElementById("spot"), `
+-- forecast-app: nightly feature pull
+SELECT *
+FROM \`acme-dw.sales.orders\`
+WHERE order_date = (SELECT MAX(run_date) FROM ops.runs)
+   OR store_id IN (12, 42)
+`, {
+  tasks: [
+    { q: "The dry run says <b>2.18 TB</b>. The model only uses <code>order_date</code>, <code>store_id</code>, <code>product_id</code> and <code>quantity</code>.", answer: 2,
+      fix: "List the four columns. That alone drops the scan from 2.18 TB to about 100 GB, because <code>basket_json</code> and <code>notes</code> were most of the bill." },
+    { q: "Columns fixed, but the dry run still counts all <b>1,096 partitions</b>, though the job wants one day.", answer: 4,
+      fix: "A value from a subquery can't prune. Your app already knows which day it wants, so compute it in Python and send <code>WHERE order_date = '2026-10-24'</code>." },
+    { q: "Literal date in place, the scan briefly drops to one day. Then a teammate's store filter brings the full scan back.", answer: 5,
+      fix: "<code>OR</code> admits stores 12 and 42 from <em>every</em> date. If they meant \"only these stores\", use <code>AND</code>. If they truly need all history for two stores, run it as a separate query, which clustering on <code>store_id</code> makes cheap in practice." }
+  ],
+  notes: {
+    1: "A SQL comment (<code>--</code> to end of line). Free, never billed. Naming the job here makes it easy to find in <code>INFORMATION_SCHEMA.JOBS</code>.",
+    2: "<code>SELECT *</code> reads every column, including the 1.5 TB <code>basket_json</code>. In columnar storage you pay per column read.",
+    3: "The customer's table, as <code>project.dataset.table</code>. Fine as written: the table being big isn't the problem, reading all of it is.",
+    4: "Compares the partitioning column to the result of a subquery on <code>ops.runs</code> (your app's own run log, in its default project). BigQuery can't know that value before planning, so no partition is pruned.",
+    5: "<code>OR store_id IN (12, 42)</code>: matches rows of stores 12 and 42 on any date. With <code>OR</code>, the partition filter no longer limits which days can match."
+  }
+});
+</script>
+</body>
+</html>
