@@ -1,0 +1,10 @@
+# Notes
+
+- Role: BI developer / AI engineer. The customer uses BigQuery; Lavi's apps read from it, write results back, and Lavi builds models in the customer's project. Frame lessons as "your app / the customer's dashboard / the customer asks you…".
+- Already uses BigQuery regularly. Don't teach SQL basics or the console; teach what happens underneath and the BigQuery-specific parts.
+- BigQuery access is on the work account only, not this machine, and only on Tuesdays and Wednesdays. Lessons are self-contained in the browser. Hands-on goes in an optional "On your next office day" appendix, so it can be done later in one batch.
+- Same style as the other topics: ~20-30 min, scenario MCQs with equal-length options, every SQL/config file shown with `assets/yaml-explain.js` and a note on every line, shell steps in PowerShell/CMD/macOS-Linux.
+- Priorities chosen 2026-10-25: cost control and row-level security first (users see only their own rows), then advanced SQL, loading/modelling, connecting apps/BI.
+- Running example: customer project `acme-dw`, table `sales.orders` (~3.1 B rows, ~2.2 TB, 3 years, daily partitions on `order_date`, clustered by `store_id, product_id`). Lavi's app is `forecast-app`: a nightly feature pull, predictions written back, and an AI assistant that turns users' questions into SQL.
+- Planned order: L1 how a query is billed (bytes, partitions, clusters, guards) · L2 row-level security & authorized views · L3 who can do what: IAM, service accounts, billing project · L4 nested data: STRUCT/ARRAY/UNNEST · L5 window functions & QUALIFY · L6 writing results back (load jobs, MERGE, partition-aware writes) · L7 views, materialized views, scheduled queries · L8 connecting BI tools.
+- 2026-10-25: Lesson 1 (cost) done. Added `assets/scan-sim.js` (pick columns + filter → dry-run estimate). Reuse it for any "how much will this scan" exercise.
