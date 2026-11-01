@@ -1,0 +1,18 @@
+# Notes
+
+- Role: BI developer / AI engineer who builds customer agents. Practitioner, not a beginner: has shipped four deployments. Frame lessons as "your Tableau agent…", "the customer's security team asks…". Don't teach LLM basics.
+- **Lavi's real setups (2026-11-01):**
+  1. HR agent: reads BigQuery (fixed DDLs) + Confluence docs. Gemini via Vertex AI SDK (moved off Google ADK). Backend on Vertex AI, UI on Cloud Run.
+  2. HR agent on-prem: one Docker container on a customer Linux machine, whole process inside.
+  3. Tableau agent: Tableau dashboard extension. Reads field names, field descriptions, datasource description, an org prompt; runs VizQL queries; answers. Anthropic API (Claude). Backend and frontend on Render.
+  4. Tableau agent on-prem: Docker on the customer's Kubernetes.
+  On-prem deployments (2, 4) still call the cloud LLM API. Only the hosting is on-prem.
+- Confirmed 2026-11-01: the HR backend ran on **Agent Engine** (now Agent Runtime). The Tableau agent uses its **own harness** (no framework), and reading its code showed it's **mostly a workflow** (a fixed chain of LLM calls with at most one tool round), with one open agent loop (multi-step analysis). It's multi-provider and already has evals and a conversation store. Lesson 1 was corrected to say so. The detailed case-study notes are kept outside this public repo, in Claude's local memory.
+- **Teaching stance (2026-11-01):** challenge Lavi and correct mistakes plainly. Lavi's current design is a starting point, not best practice. Redesigns of the Tableau agent are welcome (deployments aren't fixed).
+- **Next session:** Lavi hasn't done Lesson 1 yet. Ask for the quiz score and anything unclear, then write Lesson 2 (harness: own loop vs Tool Runner vs Claude Agent SDK vs ADK vs LangGraph, workflow vs agent), grounded in the real Tableau agent's harness and critical of it. Before Lesson 2, read the agent's `prompt_builder.py` and `models/anthropic.py`.
+- Mission priority (2026-11-01 interview): a full blueprint for the **Tableau agent**; for **every** agent, defensible choices for customers + better accuracy/cost/latency.
+- Format: ~20-30 min, scenario MCQs with equal-length options, **plus small runnable Python exercises** in `exercises/` (`000N_<name>.py`). Every code/config file shown in a lesson uses `assets/yaml-explain.js` with a note on every line. Shell steps in PowerShell/CMD/macOS-Linux.
+- No Anthropic API key on the work machine as of 2026-11-01 (no `ANTHROPIC_API_KEY`, no `ant` CLI). Exercises say how to set a key; the lesson must also work without running them.
+- Cross-topic links worth using: `../../kubernetes/` (on-prem K8s deployment, lesson 4 Dockerfile), `../../bigquery/` (HR agent data, RLS, `SESSION_USER()`).
+- Accent colour: violet `#6a44b8`. Assets copied from databricks (course.css, quiz.js, yaml-explain.js, flow-stepper.js).
+- Planned order (adjust to answers): L1 an agent is a loop + five separate decisions (map) · L2 the harness: raw loop vs Tool Runner vs Claude Agent SDK vs ADK · L3 context for the Tableau agent: system prompt, org prompt, field metadata, prompt caching · L4 in context vs RAG vs skills (with token maths) · L5 conversation & turn data model (what to store, history, multi-turn) · L6 tool design (VizQL tool shape, errors, guardrails) · L7 model access: Anthropic API vs Bedrock vs Vertex, data residency, what to tell security · L8 open-source models (vLLM/Ollama) and when they fit on-prem · L9 hosting: Render / Cloud Run / customer K8s, sessions & state · L10 evals.

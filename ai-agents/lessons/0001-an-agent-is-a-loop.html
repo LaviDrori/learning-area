@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>An Agent Is a Loop</title>
+<link rel="stylesheet" href="../assets/course.css">
+<style>
+  .map svg text { font-family: var(--mono); font-size: 11px; fill: var(--fg); }
+  .map svg .title { font-weight: 600; font-size: 12px; }
+  .map svg .muted { fill: var(--muted); }
+  .map svg .outer { fill: none; stroke: var(--rule); stroke-width: 1.5; stroke-dasharray: 5 4; }
+  .map svg .box { fill: var(--panel); stroke: var(--rule); stroke-width: 1; }
+  .map svg .hl { fill: var(--panel); stroke: var(--accent); stroke-width: 1.5; }
+  .map svg .arrow { stroke: var(--accent); stroke-width: 1.5; fill: none; }
+  .map svg .arrow.dash { stroke-dasharray: 4 3; }
+  .map svg .border { stroke: var(--bad); stroke-width: 1.5; stroke-dasharray: 2 4; }
+  td.diff { color: var(--accent); font-weight: 600; }
+  .story { border-left: 3px solid var(--rule); padding-left: 1rem; margin: 1rem 0; }
+</style>
+</head>
+<body><main>
+<div class="crumbs">AI Agents · Lesson 1 · <a href="../reference/glossary.html">Glossary</a> · <a href="../reference/agent-map.html">Agent map cheat sheet</a></div>
+
+<h1>An Agent Is a Loop</h1>
+<p class="subtitle">Five separate decisions hide inside every agent you ship. Most of your questions are about just one of them. ~25 minutes, plus an optional 10-minute exercise.</p>
+
+<div class="goal"><strong>Your win today:</strong> split any of your four deployments into five boxes (model, model access, harness, context &amp; tools, hosting), say which box a customer's question is really about, and run the whole agent loop yourself in ~40 lines of Python.</div>
+
+<h2>0. Predict first <span class="score"></span></h2>
+<p>Guess even if you're unsure. Section 3 answers both.</p>
+<div class="quiz" data-answer="1">
+  <p class="q">Your Tableau agent runs in the customer's Kubernetes (deployment #4). A user asks a question. What leaves the customer's network?</p>
+  <button>nothing at all, the container runs inside</button>
+  <button>the prompt, field metadata and query rows</button>
+  <button>only the final answer shown in Tableau</button>
+  <p class="why">Your container is inside, but it calls the Anthropic API on the internet. Every call carries the system prompt (org prompt, field names and descriptions), the conversation so far, and every tool result, which means the rows your VizQL query returned. The answer is <em>written</em> outside, then sent back. Only the hosting moved on-prem.</p>
+</div>
+<div class="quiz" data-answer="2">
+  <p class="q">The model decides it needs a VizQL query. Who actually sends that query to Tableau?</p>
+  <button>the model itself, directly from Anthropic's servers</button>
+  <button>Tableau itself, by reading the model's answer</button>
+  <button>your backend code, after the model asks</button>
+  <p class="why">"The model never runs anything on its own. It emits a structured request, your code (or Anthropic's servers) runs the operation." For your own (client) tools, that's always your code.<span class="note"><a href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/how-tool-use-works">How tool use works</a></span></p>
+</div>
+
+<h2>1. The loop</h2>
+<p>Anthropic draws a line between two kinds of LLM system:<span class="note"><a href="https://www.anthropic.com/engineering/building-effective-agents">Building effective agents</a></span></p>
+<ul>
+  <li><b>Workflow</b>: "systems where LLMs and tools are orchestrated through predefined code paths". <em>Your</em> code decides the steps.</li>
+  <li><b>Agent</b>: "systems where LLMs dynamically direct their own processes and tool usage". The <em>model</em> decides the next step.</li>
+</ul>
+<p><b>By that definition, most of your Tableau agent is a workflow.</b> Its main path is a fixed chain of LLM calls (route the question, generate one query with at most one tool round, synthesize the answer), and your code picks every step. Only the multi-step analysis route lets the model run an open tool loop. That isn't a flaw. Anthropic recommends "the simplest solution possible, and only increasing complexity when needed". But you should choose which one you're building on purpose (Lesson 2). An agent loop works like this, and the mechanism is small. You send a request with a list of <b>tools</b>. If the model wants one, the reply ends with <code>stop_reason: "tool_use"</code> and contains a <code>tool_use</code> block: the tool's name and its input. Your code runs it and sends back a <code>tool_result</code>. The docs sum up the whole loop in one line: "while <code>stop_reason == "tool_use"</code>, run the tools and continue the conversation." Any other stop reason (<code>end_turn</code>, <code>max_tokens</code>, <code>stop_sequence</code>, <code>refusal</code>) ends it.<span class="note"><a href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/how-tool-use-works">How tool use works</a> · <a href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview">Tool use overview</a></span></p>
+<p>Follow one question through a Tableau agent built as a loop. Predict each hop before you reveal it.</p>
+<div id="flow"></div>
+<p>Hops 3 and 5 cross from your code to the model. Everything else happens in your code, wherever that code runs.</p>
+
+<h2>2. Five boxes</h2>
+<p>Every "how should I build my agent" question is really about one of five separate decisions. This split is mine, not a vendor's, but each box maps onto real product categories.</p>
+<figure class="map">
+<svg viewBox="0 0 640 270" role="img" aria-label="Left: the UI (Tableau extension or web app) sends a question to box 5, Hosting, where your code runs. Inside Hosting are box 3, Harness (the loop) and box 4, Context and tools. An arrow carrying the prompt and tool results crosses a possible network boundary to box 2, Model access (Anthropic API, Bedrock, Google Cloud or self-hosted), which contains box 1, the Model.">
+  <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker></defs>
+  <rect class="box" x="6" y="108" width="104" height="58" rx="5"/>
+  <text x="16" y="130" class="title">UI</text>
+  <text x="16" y="148" class="muted">extension,</text>
+  <text x="16" y="160" class="muted">web app</text>
+  <path class="arrow" d="M112,137 L138,137" marker-end="url(#ah)"/>
+
+  <rect class="outer" x="142" y="24" width="244" height="236" rx="8"/>
+  <text x="152" y="18" class="title">⑤ Hosting: where your code runs</text>
+  <text x="156" y="44" class="muted">Render · Cloud Run · VM · K8s</text>
+  <rect class="hl" x="156" y="56" width="216" height="82" rx="5"/>
+  <text x="168" y="76" class="title">③ Harness: the loop</text>
+  <text x="168" y="96">your own loop · Tool Runner</text>
+  <text x="168" y="112">Claude Agent SDK · ADK</text>
+  <text x="168" y="128">LangGraph · managed runtimes</text>
+  <rect class="hl" x="156" y="150" width="216" height="98" rx="5"/>
+  <text x="168" y="170" class="title">④ Context &amp; tools</text>
+  <text x="168" y="190">system + org prompt</text>
+  <text x="168" y="206">field &amp; table metadata, docs</text>
+  <text x="168" y="222">RAG · skills</text>
+  <text x="168" y="238">tools: VizQL, BigQuery, …</text>
+
+  <line class="border" x1="398" y1="10" x2="398" y2="266"/>
+  <text x="404" y="262" class="muted" font-size="9">network boundary?</text>
+
+  <rect class="outer" x="412" y="24" width="222" height="200" rx="8"/>
+  <text x="422" y="18" class="title">② Model access</text>
+  <text x="424" y="44" class="muted">Anthropic API · Bedrock</text>
+  <text x="424" y="60" class="muted">Google Cloud · self-hosted</text>
+  <rect class="box" x="426" y="102" width="194" height="72" rx="5"/>
+  <text x="438" y="124" class="title">① Model</text>
+  <text x="438" y="144">Claude · Gemini</text>
+  <text x="438" y="162">open weights (Qwen, Llama…)</text>
+
+  <path class="arrow" d="M374,82 L424,116" marker-end="url(#ah)"/>
+  <text x="426" y="88" class="muted" font-size="9">prompt + tool results →</text>
+  <path class="arrow dash" d="M424,160 L374,124" marker-end="url(#ah)"/>
+  <text x="426" y="192" class="muted" font-size="9">← tool_use / text</text>
+</svg>
+<figcaption>Your code (③ and ④) runs wherever ⑤ puts it. The model (①) runs wherever ② serves it. "On-prem" moves the left dashed box. Whether data leaves the network depends on the right one.</figcaption>
+</figure>
+<table>
+<tr><th>Box</th><th>The question it answers</th><th>Options you'll hear</th></tr>
+<tr><td><b>① Model</b></td><td>Which LLM reasons?</td><td>Claude Opus / Sonnet / Haiku, Gemini, open-weight models</td></tr>
+<tr><td><b>② Model access</b></td><td>Who serves that model, under which contract, in which region?</td><td>Anthropic API, Claude on Amazon Bedrock, Claude or Gemini on Google Cloud, a model you serve yourself (vLLM, Ollama)</td></tr>
+<tr><td><b>③ Harness</b></td><td>Who writes the loop, keeps the conversation, handles errors?</td><td>Your own loop, the SDK's Tool Runner, Claude Agent SDK, Google ADK, LangGraph, managed runtimes</td></tr>
+<tr><td><b>④ Context &amp; tools</b></td><td>What does the model see, and what can it do?</td><td>System prompt, org prompt, field/table metadata, docs in context or via RAG, skills, tools</td></tr>
+<tr><td><b>⑤ Hosting</b></td><td>Where does <em>your</em> code run?</td><td>Render, Cloud Run, Agent Runtime, Docker on a VM, the customer's Kubernetes</td></tr>
+</table>
+<p class="note">Sources for the options: <a href="https://platform.claude.com/docs/en/build-with-claude/claude-models-on-google-cloud/overview">Claude on Google Cloud</a>, <a href="https://platform.claude.com/docs/en/build-with-claude/claude-on-amazon-bedrock-legacy">Claude on Bedrock</a>, <a href="https://code.claude.com/docs/en/agent-sdk/overview">Claude Agent SDK</a>, <a href="https://adk.dev/">Google ADK</a>, <a href="https://docs.langchain.com/oss/python/langgraph/overview">LangGraph</a>, <a href="https://docs.vllm.ai/en/latest/">vLLM</a>.</p>
+<p><b>Some products cover several boxes, and that causes confusion.</b> On 2026-04-22 Google renamed Vertex AI to <b>Gemini Enterprise Agent Platform</b>, and Vertex AI Agent Engine to <b>Agent Runtime</b>.<span class="note"><a href="https://docs.cloud.google.com/gemini-enterprise-agent-platform/release-notes">Agent Platform release notes</a></span> Agent Platform covers ② (Gemini, Claude and open models through Model Garden) and, through Agent Runtime, ③ and ⑤: it is "a fully managed Agent Runtime to deploy and scale agents" built with ADK, LangGraph, LangChain and others.<span class="note"><a href="https://docs.cloud.google.com/vertex-ai/generative-ai/docs/agent-engine/overview">Agent Runtime</a> · <a href="https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/model-garden/explore-models">Model Garden</a></span> So "let's use Vertex" can mean two different things. Always ask: <em>for which box?</em></p>
+<p><b>The boxes are separate decisions, but they constrain each other.</b> For example, Agent Skills (box ④) work through the Anthropic API. They're not available on Claude through Bedrock or Google-managed Google Cloud (box ②).<span class="note"><a href="https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview">Agent Skills overview</a></span></p>
+
+<h2>3. Your four deployments on the map</h2>
+<table>
+<tr><th></th><th>① Model</th><th>② Access</th><th>③ Harness</th><th>④ Context &amp; tools</th><th>⑤ Hosting</th></tr>
+<tr><td><b>#1 HR, cloud</b></td><td>Gemini</td><td>Google Cloud (Vertex AI)</td><td>your loop on the Gemini SDK (was ADK)</td><td>fixed DDLs, Confluence docs, BigQuery tool</td><td>Agent Engine (now Agent Runtime) backend, Cloud Run UI</td></tr>
+<tr><td><b>#2 HR, on-prem</b></td><td>same</td><td>same, over the internet</td><td>same</td><td>same</td><td class="diff">one Docker container on the customer's Linux box</td></tr>
+<tr><td><b>#3 Tableau, cloud</b></td><td>Claude</td><td>Anthropic API</td><td>your own code: a fixed chain of LLM calls, plus one open loop (analysis)</td><td>fields + descriptions, datasource description, org prompt, VizQL tool</td><td>Render</td></tr>
+<tr><td><b>#4 Tableau, on-prem</b></td><td>same</td><td>same, over the internet</td><td>same</td><td>same</td><td class="diff">Docker on the customer's Kubernetes</td></tr>
+</table>
+<p>Within each agent, the cloud and on-prem versions differ in one column only: ⑤. That's good engineering, because you ship one codebase. But it also means <b>"on-prem" in #2 and #4 means "our code runs in your network", not "nothing leaves your network"</b>. Box ② is still a cloud API, and each model call carries the prompt, the metadata and the query rows.</p>
+<p>Before you promise a customer "nothing leaves", box ② has to move too. The usual options:</p>
+<ul>
+  <li><b>An open-weight model you serve inside their network</b> (vLLM, Ollama). Then ① changes as well, and so does answer quality (Lesson 8).</li>
+  <li><b>Claude or Gemini inside the customer's own cloud account</b> (Bedrock in their AWS, or their Google Cloud project). Data still goes to the cloud, but under <em>their</em> contract, IAM and region. On Bedrock, "model providers don't have any access to those accounts… they don't have access to Amazon Bedrock logs or to customer prompts and completions".<span class="note"><a href="https://docs.aws.amazon.com/bedrock/latest/userguide/data-protection.html">Bedrock data protection</a></span> Many security teams accept that. Lesson 7 covers the details.</li>
+</ul>
+
+<h2>4. Your questions, placed on the map</h2>
+<p>Here's every question you came with, sorted by box. This is also the plan for the course.</p>
+<table>
+<tr><th>Your question</th><th>Box</th><th>Lesson</th></tr>
+<tr><td>Which agent platform: SDK? ADK? modular platforms?</td><td>③</td><td>2</td></tr>
+<tr><td>How to use prompts, table relationships, the org prompt?</td><td>④</td><td>3</td></tr>
+<tr><td>RAG, or put docs and data straight in the context? Can I use skills?</td><td>④ (skills also depend on ②)</td><td>4</td></tr>
+<tr><td>Output data model: turns, conversation</td><td>③ what your loop stores</td><td>5</td></tr>
+<tr><td>Which tools?</td><td>④</td><td>6</td></tr>
+<tr><td>Why Bedrock, Vertex AI, or the like?</td><td>②</td><td>7</td></tr>
+<tr><td>How do I use open-source models?</td><td>① + ②</td><td>8</td></tr>
+<tr><td>Where to run: on-prem, Cloud Run, Render?</td><td>⑤ (and ② if "nothing leaves" matters)</td><td>9</td></tr>
+<tr><td><em>(added)</em> How do I know a change made answers better?</td><td>all</td><td>10: evals</td></tr>
+</table>
+<p class="note">The order is a proposal. If one question is urgent for a customer, tell me and it goes first.</p>
+
+<h2>5. The loop in 40 lines</h2>
+<p>This is <a href="../exercises/0001_agent_loop.py"><code>exercises/0001_agent_loop.py</code></a>, a stripped-down Tableau agent with one fake tool. Everything in section 1 is in it. Click each line marked ●.</p>
+<div id="yx-loop"></div>
+<p>Anthropic's advice on frameworks applies here: "start by using LLM APIs directly: many patterns can be implemented in a few lines of code", and "if you do use a framework, ensure you understand the underlying code."<span class="note"><a href="https://www.anthropic.com/engineering/building-effective-agents">Building effective agents</a></span> Every harness in box ③, ADK included, wraps this same loop. Lesson 2 is about what they add on top.</p>
+
+<h3>Run it (optional, needs an Anthropic API key, costs a few cents at most)</h3>
+<p>From the repo root:</p>
+<p><b>PowerShell</b></p>
+<pre>pip install anthropic
+$env:ANTHROPIC_API_KEY = "sk-ant-..."
+python ai-agents\exercises\0001_agent_loop.py</pre>
+<p><b>CMD</b></p>
+<pre>pip install anthropic
+set ANTHROPIC_API_KEY=sk-ant-...
+python ai-agents\exercises\0001_agent_loop.py</pre>
+<p><b>macOS / Linux</b></p>
+<pre>pip install anthropic
+export ANTHROPIC_API_KEY=sk-ant-...
+python3 ai-agents/exercises/0001_agent_loop.py</pre>
+<table>
+<tr><th>Line</th><th>What it does</th></tr>
+<tr><td><code>pip install anthropic</code></td><td>Installs Anthropic's official Python SDK from PyPI, which gives you <code>anthropic.Anthropic()</code>.</td></tr>
+<tr><td><code>$env:… = "…"</code> / <code>set …=…</code> / <code>export …=…</code></td><td>Sets the environment variable <code>ANTHROPIC_API_KEY</code> for this terminal window only. The SDK reads it automatically. Replace <code>sk-ant-...</code> with your key from the Claude Console.</td></tr>
+<tr><td><code>python …0001_agent_loop.py</code></td><td>Runs the script. Backslashes on Windows, slashes on macOS/Linux. <code>python3</code> on macOS/Linux, where <code>python</code> may be missing or Python 2.</td></tr>
+</table>
+<p><b>Expected:</b> something like this (the wording of the last line will vary):</p>
+<pre>[model] stop_reason=tool_use
+[tool]  query_datasource({'dimension': 'Region', 'measure': 'SUM(Sales)'})
+[model] stop_reason=end_turn
+South sells the most, with 211,000 in sales: 111,000 more than East (100,000).</pre>
+<p><b>Then try this</b>, and predict the trace before each run (edit the question on the last line):</p>
+<ol>
+  <li>Ask <em>"Which category is least profitable?"</em>. Expect it to pick <code>Category</code> and <code>SUM(Profit)</code> on its own. That's the "agent" part.</li>
+  <li>Ask <em>"What's the capital of France?"</em>. Expect a single <code>end_turn</code> and no tool call. The model decides whether to use a tool.</li>
+  <li>Delete <em>"Use the query tool for any number."</em> from line 6 and ask the region question again. Does it still query? This is box ④ steering behaviour.</li>
+</ol>
+
+<h2>6. With the customer</h2>
+<div class="story">
+<h3>"Your agent runs in our cluster, so our data stays here, right?"</h3>
+<p>Not quite. Point at box ②: "The code runs in your cluster. Each question sends the org prompt, the field metadata and the query results to the model API. If that's a problem, we can serve the model from your own AWS or Google Cloud account, or run an open model inside your network." It's an honest answer, and you've offered them choices.</p>
+</div>
+<div class="story">
+<h3>"Should we move the agent to Vertex?"</h3>
+<p>Ask "for the model, or for hosting?" before you discuss anything else. If they mean ②, they want Gemini or Claude billed through their Google Cloud account. If they mean ⑤, they want Agent Runtime or Cloud Run to run your container. These are different projects with different costs.</p>
+</div>
+
+<hr>
+<h2>7. Check yourself <span class="score"></span></h2>
+<div class="quiz" data-answer="0">
+  <p class="q">The customer's security team asks: "If your agent runs in our Kubernetes, does any of our data leave?" What's the honest answer?</p>
+  <button>Yes: prompts and query rows reach the model API</button>
+  <button>No: the container runs entirely inside your own network</button>
+  <button>Only metadata: field names go out, never any rows</button>
+  <p class="why">Tool results (the rows) go back to the model in the next request, and that's how it can answer. Box ⑤ moved on-prem; box ② didn't.</p>
+</div>
+<div class="quiz" data-answer="2">
+  <p class="q">You moved the HR agent from Google ADK to calling Gemini through the SDK yourself. Which box changed?</p>
+  <button>① model: which LLM gives answers</button>
+  <button>② model access: who serves Gemini</button>
+  <button>③ harness: who writes the loop</button>
+  <p class="why">Same Gemini, same Google Cloud access. Only the code that runs the tool loop changed. If the ADK agent was also hosted on Agent Engine and now runs elsewhere, ⑤ changed too.</p>
+</div>
+<div class="quiz" data-answer="1">
+  <p class="q">A user asks about "revenue" and the Tableau agent sums the wrong field. Which box do you look at first?</p>
+  <button>⑤ hosting: move it to a bigger machine</button>
+  <button>④ context: the field descriptions and org prompt</button>
+  <button>① model: switch to a larger, newer model</button>
+  <p class="why">The model only knows your fields through what you put in its context. If nothing maps "revenue" to a field, it guesses. Anthropic's goal for context: "the smallest possible set of high-signal tokens that maximize the likelihood of some desired outcome." Fix that first; it's cheaper than changing the model. Hosting never changes answers.<span class="note"><a href="https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents">Effective context engineering</a></span></p>
+</div>
+<div class="quiz" data-answer="2">
+  <p class="q">Your loop sends back a <code>tool_result</code>. How does the model know which request it answers?</p>
+  <button>by the order results appear in the message</button>
+  <button>by matching the tool name to the call</button>
+  <button>by the tool_use_id copied from the call</button>
+  <p class="why">Every <code>tool_use</code> block has an <code>id</code>, and each result echoes it back as <code>tool_use_id</code> (line 33 of the exercise). The model can ask for two queries with the same tool in one turn, and only the IDs tell them apart.</p>
+</div>
+<div class="quiz" data-answer="0">
+  <p class="q">The customer says "we'll just put it on Vertex". What do you ask back?</p>
+  <button>Do you mean the model access or hosting?</button>
+  <button>Do you mean Gemini models or Claude models?</button>
+  <button>Do you mean Cloud Run or Kubernetes there?</button>
+  <p class="why">Agent Platform (formerly Vertex AI) covers box ② (Gemini, Claude and open models) <em>and</em> boxes ③ + ⑤ (Agent Runtime hosts agents). The other two questions only make sense once you know which box they mean.</p>
+</div>
+<div class="quiz" data-answer="1">
+  <p class="q">Your loop gets <code>stop_reason: "end_turn"</code>. What does the code do next?</p>
+  <button>runs the tools the model asked for</button>
+  <button>returns the model's text as the answer</button>
+  <button>sends the messages to the model again</button>
+  <p class="why">Only <code>tool_use</code> means "run these and call me again". <code>end_turn</code> means the model is done (lines 46-47). The exercise treats <code>max_tokens</code> and <code>refusal</code> as final too. A production agent should handle them separately; Lesson 2 shows how harnesses do it.</p>
+</div>
+<div class="recall">
+  <p class="q">Without scrolling up: name the five boxes, say which one decides whether customer data leaves their network, and give two ways to keep it inside.</p>
+  <div class="model">① Model, ② model access, ③ harness, ④ context &amp; tools, ⑤ hosting. Box ② decides where prompts and tool results go; moving ⑤ on-prem doesn't change it. To keep data in: serve an open-weight model inside their network (② and ① change), or call Claude or Gemini through the customer's own cloud account (Bedrock in their AWS, or their Google Cloud project). That keeps data under their contract and region, though it's still a cloud service.</div>
+</div>
+
+<hr>
+<div class="callout source"><b>Primary source, read this next (~20 min):</b> <a href="https://www.anthropic.com/engineering/building-effective-agents">Anthropic, Building effective agents</a>. It's the source for the workflow/agent split and the "start simple" advice, and it walks through the patterns (prompt chaining, routing, orchestrator-workers) that Lesson 2 builds on. Then skim <a href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/how-tool-use-works">How tool use works</a> to see the loop from the API's side.</div>
+<div class="callout ask"><b>Questions? Ask me.</b> For example: <em>"what would actually change in my code to call Claude through Bedrock?"</em>, <em>"is my HR agent a workflow or an agent?"</em>, or <em>"what does ADK give me that this 40-line loop doesn't?"</em></div>
+
+<div class="next"><span>AI Agents · Lesson 1</span><span>Next: the harness. Own loop, Tool Runner, Agent SDK or ADK? →</span></div>
+</main>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/yaml-explain.js"></script>
+<script src="../assets/flow-stepper.js"></script>
+<script>
+FlowStepper.mount(document.getElementById("flow"), [
+  { title: "Ask", who: "Tableau extension → your backend (⑤)",
+    what: "The user types a question in the dashboard extension. The extension sends it to your backend, which runs on Render (#3) or in the customer's Kubernetes (#4).",
+    artifact: "\"Which region sells the most?\"", ask: "" },
+  { title: "Build the request", who: "your backend: ③ harness + ④ context",
+    what: "Your code assembles one request: a system prompt (role, org prompt, datasource description, field names and descriptions), the conversation so far, and the tool definitions, such as a <code>query_datasource</code> tool whose input schema lists the allowed fields.",
+    artifact: "system=… · tools=[query_datasource] · messages=[…]", ask: "What exactly do you send to the model?" },
+  { title: "First model call", who: "your backend → ② Anthropic API → ① Claude",
+    what: "The whole request goes over the internet to the model. Claude decides it needs data and replies with a <code>tool_use</code> block instead of an answer. <b>In #4, this is the hop that leaves the customer's network.</b>",
+    artifact: "stop_reason: \"tool_use\" · input: {\"dimension\": \"Region\", \"measure\": \"SUM(Sales)\"}", ask: "Does our data leave our network?" },
+  { title: "Run the tool", who: "your backend (⑤) → Tableau VizQL Data Service",
+    what: "The model only <em>asked</em>. Your code validates the input and calls VizQL Data Service (<code>query-datasource</code>) with whatever Tableau identity you configured. The model never touches Tableau directly.",
+    artifact: "VDS query-datasource → 4 rows", ask: "Whose permissions does the query run with?" },
+  { title: "Send the result back", who: "your backend → ② → ①",
+    what: "Your code appends the model's <code>tool_use</code> turn and a <code>tool_result</code> (the rows, as JSON, tagged with the call's id) to the conversation, then calls the model again. <b>The rows now go to the model too.</b>",
+    artifact: "tool_result · tool_use_id: toolu_01… · [{\"Region\": \"South\", \"SUM(Sales)\": 211000}, …]", ask: "" },
+  { title: "Answer", who: "① → your backend → extension",
+    what: "Claude has what it needs and replies with text and <code>stop_reason: \"end_turn\"</code>. Your loop stops and returns the text to the extension. What you store from this turn (messages, tool calls, tokens) is your output data model (Lesson 5).",
+    artifact: "stop_reason: \"end_turn\" · \"South leads with 211,000…\"", ask: "Can we see which query produced this number?" }
+], "Customer might ask");
+
+YamlExplain.mount(document.getElementById("yx-loop"), `
+import json
+import anthropic
+
+client = anthropic.Anthropic()
+
+SYSTEM = "You answer questions about the Superstore datasource. Use the query tool for any number."
+
+TOOLS = [{
+    "name": "query_datasource",
+    "description": "Run a query on the Superstore datasource. Returns rows as JSON.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "dimension": {"type": "string", "enum": ["Region", "Category"]},
+            "measure": {"type": "string", "enum": ["SUM(Sales)", "SUM(Profit)"]},
+        },
+        "required": ["dimension", "measure"],
+    },
+}]
+
+FAKE_ROWS = {"Region": ["East", "West", "Central", "South"], "Category": ["Technology", "Furniture", "Office Supplies"]}
+
+
+def query_datasource(dimension, measure):
+    rows = [{dimension: name, measure: 100_000 + 37_000 * i} for i, name in enumerate(FAKE_ROWS[dimension])]
+    return json.dumps(rows)
+
+
+def run_tools(content):
+    results = []
+    for call in (b for b in content if b.type == "tool_use"):
+        print(f"[tool]  {call.name}({call.input})")
+        results.append({"type": "tool_result", "tool_use_id": call.id, "content": query_datasource(**call.input)})
+    return results
+
+
+def run_agent(question):
+    messages = [{"role": "user", "content": question}]
+    while True:
+        response = client.messages.create(
+            model="claude-opus-5-5", max_tokens=16000,
+            system=SYSTEM, tools=TOOLS, messages=messages,
+        )
+        print(f"[model] stop_reason={response.stop_reason}")
+        messages.append({"role": "assistant", "content": response.content})
+        if response.stop_reason != "tool_use":
+            return next(b.text for b in response.content if b.type == "text")
+        messages.append({"role": "user", "content": run_tools(response.content)})
+
+
+if __name__ == "__main__":
+    print(run_agent("Which region sells the most, and by how much over the lowest?"))
+`, {
+  1: "Imports Python's built-in <code>json</code> module. The fake tool uses it to turn rows into a JSON string, because a <code>tool_result</code>'s content is text.",
+  2: "Imports Anthropic's official Python SDK (installed with <code>pip install anthropic</code>).",
+  4: "Creates the API client. With no arguments it reads your key from the <code>ANTHROPIC_API_KEY</code> environment variable. <b>Box ②:</b> this line decides who serves the model. <code>anthropic.AnthropicBedrockMantle(aws_region=…)</code> or <code>anthropic.AnthropicVertex(project_id=…, region=…)</code> would send the same calls to Bedrock or Google Cloud instead (Lesson 7).",
+  6: "The <b>system prompt</b>: standing instructions sent with every request. <b>Box ④.</b> In your real agent, this is where the org prompt, datasource description and field descriptions go. The second sentence pushes the model to use the tool instead of inventing numbers.",
+  8: "<code>TOOLS</code> is a Python list of tool definitions sent with every request. <code>[{</code> opens the list and its only tool.",
+  9: "<code>\"name\"</code>: what the model writes in its <code>tool_use</code> block when it wants this tool. Letters, digits, <code>_</code> and <code>-</code>.",
+  10: "<code>\"description\"</code>: the model reads this to decide <em>when</em> to use the tool and what it returns. It's prompt text in all but name. Lesson 6 is about writing good ones.",
+  11: "<code>\"input_schema\"</code>: a JSON Schema for the tool's arguments. The model's <code>tool_use.input</code> follows it.",
+  12: "<code>\"type\": \"object\"</code>: the input is one JSON object with named fields, which become your function's keyword arguments.",
+  13: "<code>\"properties\"</code>: lists the fields the object may have.",
+  14: "Field <code>dimension</code>: a string, and <code>\"enum\"</code> limits it to exactly <code>\"Region\"</code> or <code>\"Category\"</code>. In your Tableau agent, this list could come from the datasource's real field names, which stops the model from inventing fields.",
+  15: "Field <code>measure</code>: one of two aggregations, written the way Tableau writes them: <code>SUM(Sales)</code> or <code>SUM(Profit)</code>.",
+  17: "<code>\"required\"</code>: both fields must be present in every call.",
+  21: "Fake data: a dict mapping each dimension to its members. It stands in for the datasource so the exercise needs no Tableau.",
+  24: "The tool's implementation: a normal Python function. Its parameter names match the schema's properties, so <code>query_datasource(**call.input)</code> works on line 33. In the real agent, this function would call VizQL Data Service.",
+  25: "Builds one row per member: <code>{dimension: name, measure: number}</code>. <code>enumerate</code> numbers the members 0, 1, 2…, so the values are 100,000, 137,000, 174,000 and 211,000 (<code>_</code> in <code>100_000</code> is just a digit separator). South comes out highest.",
+  26: "<code>json.dumps</code> turns the list of dicts into a JSON string, the text the model will read.",
+  29: "<code>run_tools</code>: runs every tool call in one model reply and returns the list of results. <code>content</code> is the reply's list of content blocks.",
+  30: "Starts an empty list to collect one <code>tool_result</code> per call.",
+  31: "Loops over only the <code>tool_use</code> blocks (a reply can also hold <code>text</code> blocks, like \"Let me check\"). The model may ask for several calls in one reply.",
+  32: "Prints the call so you can watch the loop: the tool's <code>name</code> and the <code>input</code> dict the model chose.",
+  33: "Runs the function with the model's arguments (<code>**</code> spreads the dict into keyword arguments), and wraps the output as a <code>tool_result</code>. <code>tool_use_id</code> must equal the call's <code>id</code>. That's how the model matches results to requests.",
+  34: "Returns all results together. They go back in <b>one</b> user message (line 48).",
+  37: "<code>run_agent</code>: the whole agent. <b>Box ③, the harness</b>, is just this function.",
+  38: "The conversation starts as a single user message. <code>messages</code> is the agent's whole memory. The API itself is stateless, so you resend the full list on every call.",
+  39: "<code>while True</code>: the agent loop. It exits only through the <code>return</code> on line 47.",
+  40: "One call to the Messages API, the only endpoint involved. Each pass round the loop is one such call.",
+  41: "<code>model=\"claude-opus-5-5\"</code> picks the model (<b>box ①</b>). <code>max_tokens=16000</code> caps the length of this one reply. If the reply hits the cap, <code>stop_reason</code> is <code>max_tokens</code>.",
+  42: "Sends the system prompt, the tool list and the conversation so far. Tools, then system, then messages: that's also the order prompt caching uses (Lesson 3).",
+  44: "Prints why the model stopped: <code>tool_use</code> (it wants a tool) or <code>end_turn</code> (it's done).",
+  45: "Appends the model's full reply, including any <code>tool_use</code> blocks, to the conversation as an <code>assistant</code> message. The API expects each <code>tool_result</code> to follow the turn that asked for it.",
+  46: "If the model did <em>not</em> ask for a tool (<code>end_turn</code>, or <code>max_tokens</code> / <code>refusal</code>), the loop is over…",
+  47: "…and the agent returns the first <code>text</code> block of the reply as its answer. <code>next(…)</code> takes the first match. A production harness would check <code>refusal</code> and <code>max_tokens</code> first.",
+  48: "Otherwise, run the tools and append their results as a <code>user</code> message (tool results always travel in the user role). Then the loop goes round and calls the model again.",
+  51: "Standard Python guard: the code below runs only when you execute this file directly, not when another file imports it.",
+  52: "Asks one question and prints the final answer. Edit this string for the \"Then try this\" experiments."
+});
+</script>
+</body>
+</html>

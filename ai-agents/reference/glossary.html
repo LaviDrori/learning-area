@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Agents Glossary</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body><main>
+<div class="crumbs">Lessons: <a href="../lessons/0001-an-agent-is-a-loop.html">1</a> · Reference: <a href="agent-map.html">Agent map</a></div>
+<h1>Glossary</h1>
+<p class="subtitle">The course's single source of truth for terms. Lessons use these words exactly as defined here. Quoted text comes from the linked source.</p>
+
+<h2>The five boxes (course terms)</h2>
+<table>
+<tr><th>Term</th><th>Meaning</th><th>From</th></tr>
+<tr><td><b>① Model</b></td><td>The LLM that reasons: Claude, Gemini, an open-weight model.</td><td>L1</td></tr>
+<tr><td><b>② Model access</b></td><td>Who serves the model to you, under which contract, credentials and region: the Anthropic API, Bedrock, Google Cloud, or a server you run. Decides where prompts and tool results go.</td><td>L1</td></tr>
+<tr><td><b>③ Harness</b></td><td>The code that runs the agent loop, keeps the conversation and handles errors. Your own loop, or an SDK/framework that provides one.</td><td>L1</td></tr>
+<tr><td><b>④ Context &amp; tools</b></td><td>Everything the model sees (system prompt, org prompt, metadata, docs, history) and everything it can ask to do (tools).</td><td>L1</td></tr>
+<tr><td><b>⑤ Hosting</b></td><td>Where <em>your</em> code (③ + ④) runs: Render, Cloud Run, Agent Runtime, a VM, the customer's Kubernetes. Separate from where the model runs.</td><td>L1</td></tr>
+<tr><td><b>Org prompt</b></td><td>Lavi's term: customer-specific standing instructions (business vocabulary, rules) added to the system prompt.</td><td>L1</td></tr>
+</table>
+
+<h2>Agents and the loop</h2>
+<table>
+<tr><th>Term</th><th>Meaning</th><th>From</th></tr>
+<tr><td><b>Workflow</b></td><td>"Systems where LLMs and tools are orchestrated through predefined code paths." Your code decides the steps.</td><td><a href="https://www.anthropic.com/engineering/building-effective-agents">Anthropic</a> · L1</td></tr>
+<tr><td><b>Agent</b></td><td>"Systems where LLMs dynamically direct their own processes and tool usage." The model decides the next step.</td><td><a href="https://www.anthropic.com/engineering/building-effective-agents">Anthropic</a> · L1</td></tr>
+<tr><td><b>Agent loop</b></td><td>Call the model; while <code>stop_reason</code> is <code>tool_use</code>, run the requested tools, append the results, call again.</td><td><a href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/how-tool-use-works">docs</a> · L1</td></tr>
+<tr><td><b>Tool</b></td><td>A capability you describe to the model with a <code>name</code>, <code>description</code> and <code>input_schema</code>. <b>Client tools</b> run in your code; <b>server tools</b> run on Anthropic's servers.</td><td><a href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview">docs</a> · L1</td></tr>
+<tr><td><b>tool_use / tool_result</b></td><td>The model's request to run a tool (has an <code>id</code>, <code>name</code>, <code>input</code>), and your reply with the output (echoes the id as <code>tool_use_id</code>, sent in a <code>user</code> message).</td><td><a href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview">docs</a> · L1</td></tr>
+<tr><td><b>stop_reason</b></td><td>Why the model stopped: <code>tool_use</code> (run tools, continue), <code>end_turn</code> (done), <code>max_tokens</code> (hit the cap), <code>stop_sequence</code>, <code>refusal</code>.</td><td><a href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/how-tool-use-works">docs</a> · L1</td></tr>
+<tr><td><b>System prompt</b></td><td>Standing instructions sent with every request, outside the conversation. Where role, rules, org prompt and metadata go.</td><td><a href="https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices">docs</a> · L1</td></tr>
+</table>
+
+<h2>Products</h2>
+<table>
+<tr><th>Term</th><th>Box</th><th>Meaning</th><th>From</th></tr>
+<tr><td><b>Anthropic API</b></td><td>②</td><td>Claude served by Anthropic (Messages API). Required for some features, e.g. Agent Skills.</td><td><a href="https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview">docs</a> · L1</td></tr>
+<tr><td><b>Amazon Bedrock</b></td><td>②</td><td>AWS's "fully managed service" for foundation models, Claude included, under AWS credentials and contracts.</td><td><a href="https://docs.aws.amazon.com/bedrock/latest/userguide/what-is-bedrock.html">AWS</a> · L1</td></tr>
+<tr><td><b>Gemini Enterprise Agent Platform</b></td><td>② ③ ⑤</td><td>Google's AI platform, called <b>Vertex AI</b> until 2026-04-22. Serves Gemini, Claude and open models (Model Garden) and hosts agents (Agent Runtime).</td><td><a href="https://docs.cloud.google.com/gemini-enterprise-agent-platform/release-notes">Google</a> · L1</td></tr>
+<tr><td><b>Agent Runtime</b></td><td>③ ⑤</td><td>Formerly <b>Vertex AI Agent Engine</b>. Managed hosting for agents built with ADK, LangGraph, LangChain and others, with Sessions and Memory Bank.</td><td><a href="https://docs.cloud.google.com/vertex-ai/generative-ai/docs/agent-engine/overview">Google</a> · L1</td></tr>
+<tr><td><b>Google ADK</b></td><td>③</td><td>Agent Development Kit: Google's model-agnostic agent framework (Python, TS, Go, Java, Kotlin).</td><td><a href="https://adk.dev/">adk.dev</a> · L1</td></tr>
+<tr><td><b>Claude Agent SDK</b></td><td>③</td><td>"The same tools, agent loop, and context management that power Claude Code", as a library you host.</td><td><a href="https://code.claude.com/docs/en/agent-sdk/overview">docs</a> · L1</td></tr>
+<tr><td><b>Tool Runner</b></td><td>③</td><td>A beta helper in the regular Anthropic SDK that runs the tool loop for tools you define. Not the Agent SDK.</td><td><a href="https://code.claude.com/docs/en/agent-sdk/overview">docs</a> · L1</td></tr>
+<tr><td><b>LangGraph</b></td><td>③</td><td>"A low-level orchestration framework and runtime for building, managing, and deploying long-running, stateful agents."</td><td><a href="https://docs.langchain.com/oss/python/langgraph/overview">docs</a> · L1</td></tr>
+<tr><td><b>Agent Skill</b></td><td>④</td><td>"A directory containing a SKILL.md file" of instructions (and optional scripts) loaded only when relevant. Via the API: Anthropic API only.</td><td><a href="https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills">Anthropic</a> · L1</td></tr>
+<tr><td><b>vLLM · Ollama</b></td><td>② (self-hosted)</td><td>Servers for running open-weight models yourself, e.g. inside a customer's network.</td><td><a href="https://docs.vllm.ai/en/latest/">vLLM</a> · <a href="https://docs.ollama.com/">Ollama</a> · L1</td></tr>
+<tr><td><b>VizQL Data Service (VDS)</b></td><td>④ (tool target)</td><td>Tableau's API for querying published datasources "outside of a Tableau visualization": <code>read-metadata</code>, <code>query-datasource</code>.</td><td><a href="https://help.tableau.com/current/api/vizql-data-service/en-us/index.html">Tableau</a> · L1</td></tr>
+</table>
+</main></body>
+</html>
