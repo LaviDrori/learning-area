@@ -1,0 +1,531 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Who Owns the Loop</title>
+<link rel="stylesheet" href="../assets/course.css">
+<style>
+  .verdict { display: grid; gap: 1rem; }
+  @media (min-width: 46rem) { .verdict { grid-template-columns: 1fr 1fr; } }
+  .verdict > div { border: 1px solid var(--rule); border-radius: 6px; padding: .6rem 1rem; }
+  .verdict h3 { margin-top: .4rem; }
+  .verdict .keep h3 { color: var(--good); }
+  .verdict .fix h3 { color: var(--bad); }
+  .verdict li { margin: .35rem 0; }
+  td.yes { color: var(--good); } td.no { color: var(--bad); }
+</style>
+</head>
+<body><main>
+<div class="crumbs">AI Agents · Lesson 2 · <a href="0001-an-agent-is-a-loop.html">← Lesson 1</a> · <a href="../reference/glossary.html">Glossary</a> · <a href="../reference/harness-chooser.html">Harness chooser cheat sheet</a></div>
+
+<h1>Who Owns the Loop</h1>
+<p class="subtitle">Box ③, the harness. Workflow or agent, your own loop or someone else's, and an honest verdict on the harness you built. ~25 minutes, plus two optional exercises.</p>
+
+<div class="goal"><strong>Your win today:</strong> for each part of an agent, say whether it should be a workflow step or an agent loop, list what a harness owns besides the loop, pick a harness from seven options with a reason a customer would accept, and know the two changes that matter most in your Tableau agent's harness.</div>
+
+<h2>0. Predict first <span class="score"></span></h2>
+<div class="quiz" data-answer="1">
+  <p class="q">Your Tableau agent's query route: classify the question, generate one VDS query (with at most one tool round to look up field values), run it, write the answer. By Anthropic's definition, what is it?</p>
+  <button>an agent, since the model picks a tool</button>
+  <button>a workflow, since your code fixes the steps</button>
+  <button>a hybrid, since the router is an LLM</button>
+  <p class="why">Your code decides every step and their order. The model only fills in each step: which route, which query, which field values to look up. That's a workflow, built from the "routing" and "prompt chaining" patterns. One bounded tool round inside a step doesn't make it an agent. An agent decides <em>how many</em> steps there are.<span class="note"><a href="https://www.anthropic.com/engineering/building-effective-agents">Building effective agents</a></span></p>
+</div>
+<div class="quiz" data-answer="0">
+  <p class="q">A customer's security team requires zero data retention (ZDR). Which harness option is ruled out today?</p>
+  <button>Claude Managed Agents, hosted and run by Anthropic</button>
+  <button>your own loop, run on your Render service</button>
+  <button>the Tool Runner, run in their Kubernetes cluster</button>
+  <p class="why">Managed Agents is "not currently eligible for Zero Data Retention or HIPAA" because sessions are stateful: "transcripts persist until you delete them". The Messages API itself is ZDR-eligible. One catch with the Tool Runner, covered in section 5: in SDK 2.x it keeps the conversation on Anthropic's servers by default.<span class="note"><a href="https://platform.claude.com/docs/en/managed-agents/overview">Managed Agents overview</a></span></p>
+</div>
+
+<h2>1. Workflow or agent, chosen per step</h2>
+<p>Lesson 1 drew the line: a <b>workflow</b> runs "through predefined code paths", while an <b>agent</b> directs "its own processes and tool usage". The choice is made <em>per step</em>, not once for the whole product. Anthropic's rule: "workflows offer predictability and consistency for well-defined tasks, whereas agents are the better option when flexibility and model-driven decision-making are needed at scale". Agents fit "open-ended problems where it's difficult or impossible to predict the required number of steps", and the price is real: "higher costs, and the potential for compounding errors". So every agent loop needs "stopping conditions (such as a maximum number of iterations)".<span class="note"><a href="https://www.anthropic.com/engineering/building-effective-agents">Building effective agents</a>: workflow patterns are prompt chaining, routing, parallelization, orchestrator-workers and evaluator-optimizer.</span></p>
+<p>Decide each step of a Tableau agent yourself:</p>
+<div class="quiz" data-answer="0">
+  <p class="q">"Total sales last month." One number from one query.</p>
+  <button>workflow: one generation call, then your code</button>
+  <button>agent: a loop the model keeps running</button>
+  <button>multi-agent: a planner and two query workers</button>
+  <p class="why">The number of steps is known (one query), so a loop adds latency and failure modes for nothing. One call that returns a validated query, then your code runs it.</p>
+</div>
+<div class="quiz" data-answer="2">
+  <p class="q">"Why did churn rise in Q3? Check the likely drivers." You can't know in advance how many queries it takes, and each one depends on the last result.</p>
+  <button>workflow: a fixed chain of three queries</button>
+  <button>workflow: one big query with every field</button>
+  <button>agent: a loop with a query budget</button>
+  <p class="why">This is the textbook case for an agent: the path depends on what the data shows. Your analysis route does exactly this, a planner step and then a tool loop capped by a VDS query budget. That's the stopping condition Anthropic asks for.</p>
+</div>
+<div class="quiz" data-answer="1">
+  <p class="q">Deciding whether a question needs an explanation, one query or a multi-step analysis.</p>
+  <button>agent: let the model call each route</button>
+  <button>workflow: one classification call picks a route</button>
+  <button>multi-agent: one agent per route, then voting</button>
+  <p class="why">Routing "classifies an input and directs it to a specialized followup task". It's one call with a fixed set of answers, the kind of output that structured outputs (section 4) can force into an <code>enum</code>.</p>
+</div>
+<p><b>Your design passes this test.</b> Router, query route and synthesis are workflow steps; analysis is the one agent loop, and it's bounded. That isn't luck you should apologize for. It's the shape Anthropic recommends. The open questions are about <em>how</em> the harness is built, not its shape.</p>
+
+<h2>2. What a harness owns</h2>
+<p>The 40-line loop from Lesson 1 handled one thing: <code>tool_use</code> → run → repeat. A production harness owns more, and each item is a place where your code, or someone else's, has to be right:</p>
+<table>
+<tr><th>Job</th><th>What goes wrong without it</th></tr>
+<tr><td><b>Every stop reason</b></td><td><code>max_tokens</code> returns half an answer as if it were whole; <code>refusal</code> returns an empty string. On current models, check <code>stop_reason</code> before reading <code>content</code>.<span class="note"><a href="https://platform.claude.com/docs/en/build-with-claude/working-with-messages">Using the Messages API</a></span></td></tr>
+<tr><td><b>Tool errors</b></td><td>A raised exception kills the request. The fix: send it back as a <code>tool_result</code> with <code>is_error: true</code> so the model can correct itself. The Tool Runner does exactly this.<span class="note"><a href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-runner">Tool runner</a></span></td></tr>
+<tr><td><b>Limits</b></td><td>A loop with no round, token or query budget can run up cost on one question. A hard stop with no final turn leaves the user with nothing.</td></tr>
+<tr><td><b>Conversation state</b></td><td>Where the history lives: your memory, your database, or the provider's servers. That decides what you tell a security team.</td></tr>
+<tr><td><b>Context management</b></td><td>Cache breakpoints, compaction and history trimming. The order is tools → system → messages, and a byte change in the prefix invalidates the cache from that point on.<span class="note"><a href="https://platform.claude.com/docs/en/build-with-claude/prompt-caching">Prompt caching</a></span></td></tr>
+<tr><td><b>Output contract</b></td><td>The next step parses the model's output. Without a schema the model can return "malformed JSON… missing required fields".<span class="note"><a href="https://platform.claude.com/docs/en/build-with-claude/structured-outputs">Structured outputs</a></span></td></tr>
+<tr><td><b>Model and API churn</b></td><td>Every model or API version changes what requests may contain. Example: from API version <code>2026-10-21</code>, sending <code>temperature</code> at all returns a 400.<span class="note"><a href="https://platform.claude.com/docs/en/build-with-claude/working-with-messages">Using the Messages API</a></span></td></tr>
+<tr><td><b>Usage and traces</b></td><td>You can't see what a question cost or where it spent its tokens.</td></tr>
+</table>
+
+<h3>Exercise A (offline, no API key): break a harness on purpose</h3>
+<p><a href="../exercises/0002_own_harness.py"><code>exercises/0002_own_harness.py</code></a> is a small harness that covers the first three jobs, plus five checks that drive it with a <em>scripted fake model</em>. It runs in a second with plain Python. Click each line marked ●.</p>
+<div id="yx-own"></div>
+<p><b>Run it</b> from the repo root (no install, no key):</p>
+<p><b>PowerShell</b></p>
+<pre>python ai-agents\exercises\0002_own_harness.py</pre>
+<p><b>CMD</b></p>
+<pre>python ai-agents\exercises\0002_own_harness.py</pre>
+<p><b>macOS / Linux</b></p>
+<pre>python3 ai-agents/exercises/0002_own_harness.py</pre>
+<p><code>python</code> runs the script with your installed Python 3. Backslashes on Windows, slashes on macOS/Linux, where the command is usually <code>python3</code>. <b>Expected:</b> five lines starting with <code>PASS</code>.</p>
+<p><b>Then break it.</b> Make one change at a time, <em>predict which check fails</em>, run, then undo:</p>
+<ol>
+  <li>Set <code>MAX_ROUNDS = 1</code> (line 4).</li>
+  <li>Delete the <code>except</code> branch (lines 17-18) and un-indent line 16.</li>
+  <li>Delete the <code>max_tokens</code> guard (lines 24-25).</li>
+  <li>Delete the refusal branch (lines 30-31).</li>
+  <li>On line 23, replace <code>"auto" if allow_tools else "none"</code> with <code>"auto"</code>.</li>
+</ol>
+<div class="recall">
+  <p class="q">Write down your five predictions (which check fails, and with what error) before you run them.</p>
+  <div class="model">1 → <code>check_last_round_turns_tools_off</code>, RuntimeError "model asked for a tool after tools were turned off" (the second tool request now lands on the tools-off round). 2 → <code>check_tool_error_goes_back_as_is_error</code>, ValueError "no field named Country" (the exception escapes and kills the run). 3 → <code>check_cut_off_answer_raises</code>, AssertionError (half an answer came back as if it were complete). 4 → <code>check_refusal_gets_a_safe_answer</code>, AssertionError (the user would get an empty string). 5 → <code>check_last_round_turns_tools_off</code>, AssertionError (the choices list is all <code>auto</code>). Each line exists to make exactly one check pass. That's what "the harness owns it" means.</div>
+</div>
+
+<h2>3. Seven options for box ③</h2>
+<p>All of them wrap the same loop. They differ in who runs it, where it runs, which models it can call and what it adds. Two of them are really hosting (box ⑤) that comes with harness services.</p>
+<table>
+<tr><th>Option</th><th>Who runs the loop, and where</th><th>Models</th><th>What it adds over your loop</th><th>Watch out</th></tr>
+<tr><td><b>Your own loop</b> on the Messages API</td><td>Your code, in your container</td><td>Any provider you write an adapter for</td><td>Nothing. Full control, and you write and maintain everything.</td><td>You own all eight jobs above, and every API change.</td></tr>
+<tr><td><b>Tool Runner</b> (beta helper in the <code>anthropic</code> SDK)</td><td>The SDK, in your process</td><td>Claude only, on the Claude API, Bedrock, Google Cloud and Foundry</td><td>The loop, tool schemas generated from typed Python functions, exceptions sent back as <code>is_error</code>, <code>max_iterations</code>, per-turn hooks, compaction</td><td>Beta. It stops at <code>max_iterations</code> without forcing an answer. SDK 2.x keeps a server-side "message thread" by default (section 5).<span class="note"><a href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-runner">Tool runner</a></span></td></tr>
+<tr><td><b>Claude Agent SDK</b></td><td>"A library that runs the Claude Code binary" as a subprocess, in your container</td><td>Claude (Anthropic API, Bedrock, Google Cloud)</td><td>Built-in file, shell and web tools, permissions, sessions, hooks, subagents, MCP</td><td>Built for agents that work in files and a shell. Plan on "1 GiB RAM, 5 GiB disk, and 1 CPU per agent", with state on local disk.<span class="note"><a href="https://code.claude.com/docs/en/agent-sdk/overview">Agent SDK overview</a> · <a href="https://code.claude.com/docs/en/agent-sdk/hosting">Hosting</a></span></td></tr>
+<tr><td><b>Claude Managed Agents</b> (beta)</td><td>Anthropic runs the loop. Tools run in Anthropic's sandbox or a self-hosted one.</td><td>Claude, on the Claude API, Claude Platform on AWS and Claude on Google Cloud (Anthropic managed)</td><td>Loop + hosting + persisted sessions, compaction, scheduled runs</td><td>Not ZDR or HIPAA eligible. Not on Bedrock or Google-managed Google Cloud.<span class="note"><a href="https://platform.claude.com/docs/en/managed-agents/overview">Managed Agents overview</a></span></td></tr>
+<tr><td><b>Google ADK</b></td><td>The framework, in your process: Agent Runtime, Cloud Run, GKE or any container</td><td>Model-agnostic: Gemini first, adapters for Claude, LiteLLM, Ollama, vLLM</td><td>LLM agents plus workflow agents (sequential, loop, parallel), graphs, sessions, state, memory, evaluation</td><td>One more layer between you and the prompt. You moved the HR agent off it.<span class="note"><a href="https://adk.dev/">adk.dev</a></span></td></tr>
+<tr><td><b>LangGraph</b></td><td>A graph runtime, in your process</td><td>Any: you write the model calls in the graph's nodes</td><td>Durable execution, human-in-the-loop, short- and long-term memory. It "does not abstract prompts or architecture".</td><td>Graph and state machinery to learn. It pays off for long-running flows that pause and resume.<span class="note"><a href="https://docs.langchain.com/oss/python/langgraph/overview">LangGraph overview</a></span></td></tr>
+<tr><td><b>Agent Runtime</b> (Google, formerly Agent Engine)</td><td>Google hosts your ADK, LangGraph or LangChain agent</td><td>Whatever the framework supports</td><td>Managed hosting, Sessions, Memory Bank, VPC-SC, CMEK</td><td>It's box ⑤ plus services, not a harness on its own.<span class="note"><a href="https://docs.cloud.google.com/vertex-ai/generative-ai/docs/agent-engine/overview">Agent Runtime</a></span></td></tr>
+</table>
+<p>One more category matters for you: <b>multi-provider libraries</b>. <a href="https://docs.litellm.ai/docs/">LiteLLM</a> gives you one OpenAI-format interface to 100+ providers, as a Python SDK or a self-hosted proxy. <a href="https://pydantic.dev/docs/ai/overview/">Pydantic AI</a> is "a typed, extensible agent loop" with "every model a string swap away", output validated against a Pydantic model, evals and OpenTelemetry. They replace hand-written provider adapters. They don't replace your workflow.</p>
+<p>Anthropic's warning about every row except the first: frameworks "often create extra layers of abstraction that can obscure the underlying prompts and responses, making them harder to debug". A framework earns its place when it removes a job you'd otherwise get wrong, not when it renames the loop.<span class="note"><a href="https://www.anthropic.com/engineering/building-effective-agents">Building effective agents</a></span></p>
+
+<h2>4. Your harness, judged</h2>
+<p>I read your base provider class, your Claude adapter and your prompt builder. The short version: <b>the loop is better than most, and the provider layer around it costs more than it gives.</b></p>
+<div class="verdict">
+<div class="keep">
+<h3>Keep: what's right</h3>
+<ul>
+<li><b>Workflow first, one bounded loop.</b> Exactly the shape from section 1.</li>
+<li><b>A careful loop.</b> It caps the rounds and makes a final call with <code>tool_choice: none</code> while tools stay declared, so the history stays valid. It sends thinking blocks back unchanged. Results are matched by id, a tool exception becomes a result, and a dedicated exception stops the loop on a rate limit. The cache breakpoint moves to the last message every round, and real usage is recorded. Most hand-rolled loops get two of these right.</li>
+<li><b>A cache-aware prompt.</b> Static rules, then the datasource's fields, sit before the breakpoint. The date, which changes every day, comes after it.</li>
+</ul>
+</div>
+<div class="fix">
+<h3>Fix: where it's weak</h3>
+<ul>
+<li><b>The output contract is a request, not a guarantee.</b> Query generation ends with "Return ONLY valid JSON", then pulls JSON out of free text. The answer's reasoning, assumptions and suggestions come back as text between <code>---MARKERS---</code>. Structured outputs give "schema-compliant responses through constrained decoding", and they're GA on the Claude API, Bedrock, Google Cloud and Foundry. Your ~50-line prose description of the VDS query shape could be a JSON Schema instead: <code>enum</code>, <code>anyOf</code> and <code>$ref</code> are supported; recursion and numeric bounds aren't.<span class="note"><a href="https://platform.claude.com/docs/en/build-with-claude/structured-outputs">Structured outputs</a></span></li>
+<li><b>You carry all the model churn.</b> You keep a hand-written table of which models accept <code>temperature</code> and <code>effort</code>, the SDK is pinned at 0.76 (2.3 is current), and effort is smuggled in through <code>extra_body</code>. SDK 2.x sends API version <code>2026-10-21</code>, which rejects <code>temperature</code> on every model. So the upgrade is a breaking change for that table. Every new model means changes in four adapters.</li>
+<li><b>Lowest-common-denominator interface.</b> "Prompt in, dict out" leaves nowhere to pass a schema, so no provider's native structured output gets used. Each adapter also re-implements plain generate, generate-with-history and token counting. One fallback pastes history into the prompt as text. Token counting falls back to <code>len // 4</code>. Tool errors go back as text without <code>is_error</code>.</li>
+<li><b>A trap for the next provider.</b> A provider without tool hooks silently answers <em>without</em> tools instead of failing. All four have hooks today, so this isn't a live bug, but provider #5 would degrade with no error.</li>
+</ul>
+</div>
+</div>
+
+<h3>Is the multi-provider harness worth keeping?</h3>
+<p><b>Keep the workflow and the loop. Shrink or replace the provider layer, and decide which on evidence, not on "we might need it".</b></p>
+<ol>
+<li><b>Count real users of each provider.</b> Your hosted deployment pins Claude. Your eval judge can use another provider, but a judge needs one method (generate text), not a tool loop. If no customer needs a non-Claude model in the tool loop, go <b>Claude-only on the current SDK</b>. "Run it in my cloud" still works through the same SDK's Bedrock, Google Cloud and Foundry clients (box ②, Lesson 7). That covers the portability security teams actually ask about.</li>
+<li><b>If a customer really needs another vendor's model</b>, move the seam up. Instead of "prompt in, dict out", each provider implements "give me a validated <code>Query</code> for this schema" with its own native structured output. Or swap your four adapters for a maintained library such as Pydantic AI, but only after your existing evals show no drop in accuracy.</li>
+<li><b>Don't move to LangGraph or ADK.</b> Neither fixes the two real weaknesses (the output contract and model churn), and your flow is already code-controlled. The one place a graph runtime would earn its keep is the pause for plan approval in analysis. You solved that with conversation history, and at this size that's fine.</li>
+<li><b>Don't use the Agent SDK or Managed Agents here.</b> The Agent SDK is built for agents that work in files and a shell; your tools are HTTP calls to VDS. Managed Agents would put customer data in server-side sessions that aren't ZDR-eligible, and isn't offered on Bedrock. That's the opposite of what your on-prem customers are buying.</li>
+</ol>
+<p><b>The redesign I'd propose for box ③</b> (Claude-only case): the router returns a structured <code>{"route": enum}</code>; query generation uses <code>messages.parse</code> with a Pydantic model of the VDS query, and <code>strict: true</code> on the field-values tool; analysis keeps your bounded loop, or the Tool Runner with <code>thread=False</code> plus your tools-off final turn; synthesis returns <code>{answer, reasoning, assumptions[], suggestions[3]}</code> instead of text markers. One caution: if you put each datasource's field captions in an <code>enum</code>, every datasource is a new schema. "The first time you use a specific schema, there is additional latency while the grammar compiles" (cached for 24 hours). So keep captions as strings and validate them in code, as your analysis route already does.<span class="note"><a href="https://platform.claude.com/docs/en/build-with-claude/structured-outputs">Structured outputs</a></span> If you later stream answers to the UI, keep the answer as streamed text and get the metadata from a separate structured call.</p>
+
+<h2>5. The same agent on SDK helpers</h2>
+<p><a href="../exercises/0002_sdk_harness.py"><code>exercises/0002_sdk_harness.py</code></a> rebuilds Lesson 1's agent with the two SDK features your harness doesn't use: a <b>workflow step</b> with structured output (<code>messages.parse</code>), and an <b>agent loop</b> run by the Tool Runner. I tested it against a mocked API with <code>anthropic</code> 2.3.0, not against the live model.</p>
+<div id="yx-sdk"></div>
+<p><b>The thread surprise.</b> While testing, I found that the 2.x Tool Runner sends a beta header (<code>message-threads-2026-08-12</code>) and only the <em>new</em> messages each turn. The SDK's own docstring says "The loop runs over a message thread by default… Pass <code>thread=False</code> to send the full history every turn." I couldn't find this feature, or how long the server keeps thread data, on the docs' data-retention page (checked 2026-11-01). Until it's documented, use <code>thread=False</code> for any customer whose security team asks where conversations are stored. That's the cost of a borrowed harness: <b>you inherit its defaults</b>, and they can change in a minor release.</p>
+<h3>Run it (optional, needs an Anthropic API key, costs a few cents)</h3>
+<p><b>PowerShell</b></p>
+<pre>pip install anthropic pydantic
+$env:ANTHROPIC_API_KEY = "sk-ant-..."
+python ai-agents\exercises\0002_sdk_harness.py</pre>
+<p><b>CMD</b></p>
+<pre>pip install anthropic pydantic
+set ANTHROPIC_API_KEY=sk-ant-...
+python ai-agents\exercises\0002_sdk_harness.py</pre>
+<p><b>macOS / Linux</b></p>
+<pre>pip install anthropic pydantic
+export ANTHROPIC_API_KEY=sk-ant-...
+python3 ai-agents/exercises/0002_sdk_harness.py</pre>
+<p><code>pip install anthropic pydantic</code> installs Anthropic's SDK (2.x today) and Pydantic, which defines the <code>Query</code> schema. The second line sets your key for this terminal window only. The third runs the script. <b>Expected</b> (wording varies):</p>
+<pre>dimension='Category' measure='SUM(Profit)' descending=False
+South sells the most, 211,000: 111,000 more than East (100,000).</pre>
+<p><b>Then try:</b> set <code>max_iterations=1</code> and ask a question that needs two queries ("Compare the top region and the top category"). Predict what <code>run_agent</code> does. It raises <code>StopIteration</code>: the runner returned a reply that still asks for a tool and contains no text. Your own harness's tools-off final turn is the job the runner leaves to you.</p>
+
+<h2>6. With the customer</h2>
+<div class="story">
+<h3>"Why didn't you build it on LangChain, or ADK?"</h3>
+<p>"Most of the agent is a fixed workflow: classify, generate one query, run it, answer. Only multi-step analysis is a real loop, and it has a hard query budget. That's Anthropic's recommended shape, and it fits in plain code we can read line by line. A framework would add a layer between us and the prompts without adding anything this flow needs. If we ever need long pausable runs, LangGraph is where we'd look."</p>
+</div>
+<div class="story">
+<h3>"Can we run it on Azure OpenAI instead of Claude?"</h3>
+<p>Ask what the requirement really is. If it's "billing and data in our cloud", Claude through their own AWS (Bedrock) or Google Cloud account usually meets it without switching models (Lesson 7). If it really is "a different model", say what that costs: a provider adapter, plus a full run of your eval set to show answers stay accurate. Price it as a project, not a setting.</p>
+</div>
+
+<hr>
+<h2>7. Check yourself <span class="score"></span></h2>
+<div class="quiz" data-answer="1">
+  <p class="q">A tool handler raises an exception in the middle of the loop. What should the harness send back to the model?</p>
+  <button>nothing; stop the loop and show the error</button>
+  <button>a tool_result with the error and is_error true</button>
+  <button>a new user message asking it to retry</button>
+  <p class="why">The model can recover: pick another field, fix a filter. It needs the error <em>as the result of that call</em> (same <code>tool_use_id</code>), flagged with <code>is_error</code>. The Tool Runner does this automatically; your harness sends the text but not the flag.</p>
+</div>
+<div class="quiz" data-answer="2">
+  <p class="q">The analysis loop reaches its round limit while the model still wants more data. What should happen next?</p>
+  <button>drop the history and start a new loop</button>
+  <button>return the last tool result to the user</button>
+  <button>one final call with tool_choice set to none</button>
+  <p class="why">A forced final turn turns "out of budget" into an answer from the data gathered so far. Keep the tools <em>declared</em> on that call, because the history still holds <code>tool_use</code> blocks. Your harness does this, and the Tool Runner doesn't.</p>
+</div>
+<div class="quiz" data-answer="0">
+  <p class="q">A customer may want another vendor's model in the Tableau agent. Which choice makes that a contained change instead of a rewrite?</p>
+  <button>a provider seam you own, or a library</button>
+  <button>the Claude Agent SDK and its built-in tools</button>
+  <button>Claude Managed Agents set up with their key</button>
+  <p class="why">The Agent SDK, the Tool Runner and Managed Agents all run Claude only. Portability across vendors needs a seam: yours (best placed at "validated object for this schema") or a maintained one like Pydantic AI or LiteLLM.</p>
+</div>
+<div class="quiz" data-answer="2">
+  <p class="q">Query generation says "Return ONLY valid JSON" and extracts JSON from the reply. What actually guarantees a schema-valid query?</p>
+  <button>a longer prompt with more JSON query examples</button>
+  <button>a retry loop that re-asks on parse errors</button>
+  <button>structured outputs bound to the query JSON Schema</button>
+  <p class="why">Constrained decoding makes invalid output impossible instead of unlikely. Examples and retries reduce failures, but they cost tokens and latency, and they still can't promise a valid result.</p>
+</div>
+<div class="quiz" data-answer="1">
+  <p class="q">You upgrade the <code>anthropic</code> SDK from 0.76 to 2.3. Which request that worked before can now fail?</p>
+  <button>any request that sets cache_control on a block</button>
+  <button>any request that still sends a temperature value</button>
+  <button>any request that declares more than one tool</button>
+  <p class="why">SDK 2.x sends <code>anthropic-version: 2026-10-21</code>, and from that version any <code>temperature</code>, <code>top_p</code> or <code>top_k</code> is a 400. Upgrading the SDK also upgrades the API version. Read the migration guide first.</p>
+</div>
+<div class="quiz" data-answer="0">
+  <p class="q">When would the Claude Agent SDK be the right harness for one of your agents?</p>
+  <button>when the agent works in files and shells</button>
+  <button>when you need four providers behind one interface</button>
+  <button>when each answer must arrive within one second</button>
+  <p class="why">It's Claude Code as a library: built-in file, shell and web tools, a subprocess per session and state on disk. Great for an agent that edits, runs or inspects files. Overkill for one that makes HTTP calls to VDS.</p>
+</div>
+<div class="recall">
+  <p class="q">Without scrolling up: name four jobs a harness owns besides the loop, and say in two sentences whether to keep your multi-provider layer, and what to change first.</p>
+  <div class="model">Stop reasons (max_tokens, refusal), tool errors (is_error), limits plus a final turn, conversation state, context and caching, the output contract, model and API churn, usage and traces. Keep the workflow and the bounded loop, and keep the provider layer only for providers a real customer uses in the tool loop, with the seam at "validated object for a schema". First change: replace "Return ONLY valid JSON", the JSON extraction and the text markers with structured outputs.</div>
+</div>
+
+<hr>
+<div class="callout source"><b>Primary source, read this next (~15 min):</b> <a href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-runner">Claude docs, Tool runner (SDK)</a>. It's exactly what an SDK harness takes off your hands, and where it stops. Then read the first screen of <a href="https://platform.claude.com/docs/en/build-with-claude/structured-outputs">Structured outputs</a>, the single biggest fix for your query route.</div>
+<div class="callout ask"><b>Questions? Ask me.</b> For example: <em>"sketch the Pydantic model for my VDS query"</em>, <em>"what breaks if I upgrade the SDK to 2.x tomorrow?"</em>, or <em>"is my HR agent a workflow or an agent?"</em>.</div>
+
+<div class="next"><a href="0001-an-agent-is-a-loop.html">← Lesson 1: an agent is a loop</a><span>Next: context. System prompt, org prompt, field metadata and caching →</span></div>
+</main>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/yaml-explain.js"></script>
+<script>
+YamlExplain.mount(document.getElementById("yx-own"), `
+import json
+from types import SimpleNamespace as Reply
+
+MAX_ROUNDS = 2
+
+
+def query_datasource(dimension, measure):
+    if dimension not in ("Region", "Category"):
+        raise ValueError(f"no field named {dimension}")
+    return json.dumps([{dimension: "South", measure: 211_000}])
+
+
+def run_tool(call):
+    result = {"type": "tool_result", "tool_use_id": call.id}
+    try:
+        return result | {"content": query_datasource(**call.input)}
+    except Exception as error:
+        return result | {"content": str(error), "is_error": True}
+
+
+def call_model(model, messages, round_number):
+    allow_tools = round_number < MAX_ROUNDS
+    response = model(messages, {"type": "auto" if allow_tools else "none"})
+    if response.stop_reason == "max_tokens":
+        raise RuntimeError("answer cut off: raise max_tokens or lower effort")
+    return response
+
+
+def final_text(response):
+    if response.stop_reason == "refusal":
+        return "Sorry, I can't help with that request."
+    return next(block.text for block in response.content if block.type == "text")
+
+
+def run_agent(model, question):
+    messages = [{"role": "user", "content": question}]
+    for round_number in range(MAX_ROUNDS + 1):
+        response = call_model(model, messages, round_number)
+        messages.append({"role": "assistant", "content": response.content})
+        if response.stop_reason != "tool_use":
+            return final_text(response)
+        calls = [block for block in response.content if block.type == "tool_use"]
+        messages.append({"role": "user", "content": [run_tool(call) for call in calls]})
+    raise RuntimeError("model asked for a tool after tools were turned off")
+
+
+# ---- a fake model that replays scripted replies, so the checks need no API key ----
+
+def scripted(*replies):
+    def model(messages, tool_choice):
+        model.choices.append(tool_choice["type"])
+        model.messages = messages
+        return replies[len(model.choices) - 1]
+    model.choices = []
+    return model
+
+
+def asks_tool(dimension):
+    call = Reply(type="tool_use", id="toolu_01", name="query_datasource",
+                 input={"dimension": dimension, "measure": "SUM(Sales)"})
+    return Reply(stop_reason="tool_use", content=[call])
+
+
+def says(text, stop_reason="end_turn"):
+    return Reply(stop_reason=stop_reason, content=[Reply(type="text", text=text)])
+
+
+def check_answers_after_one_tool_call():
+    model = scripted(asks_tool("Region"), says("South leads."))
+    assert run_agent(model, "Top region?") == "South leads."
+
+
+def check_tool_error_goes_back_as_is_error():
+    model = scripted(asks_tool("Country"), says("There is no Country field."))
+    run_agent(model, "Top country?")
+    assert model.messages[2]["content"][0].get("is_error") is True
+
+
+def check_last_round_turns_tools_off():
+    model = scripted(asks_tool("Region"), asks_tool("Category"), says("Done."))
+    run_agent(model, "Compare everything")
+    assert model.choices == ["auto", "auto", "none"]
+
+
+def check_refusal_gets_a_safe_answer():
+    model = scripted(says("", stop_reason="refusal"))
+    assert run_agent(model, "…").startswith("Sorry")
+
+
+def check_cut_off_answer_raises():
+    model = scripted(says("South le", stop_reason="max_tokens"))
+    try:
+        run_agent(model, "Top region?")
+    except RuntimeError:
+        return
+    raise AssertionError("a cut-off answer was returned as if it were complete")
+
+
+if __name__ == "__main__":
+    checks = [value for name, value in list(globals().items()) if name.startswith("check_")]
+    for check in checks:
+        try:
+            check()
+            print(f"PASS  {check.__name__}")
+        except Exception as error:
+            print(f"FAIL  {check.__name__}: {type(error).__name__} {error}")
+`, {
+  1: "Imports Python's built-in <code>json</code> module. The fake tool uses <code>json.dumps</code> to turn rows into text, because a <code>tool_result</code>'s content is text.",
+  2: "Imports <code>SimpleNamespace</code> under the shorter name <code>Reply</code>. It builds an object from keyword arguments (<code>Reply(stop_reason=\"tool_use\")</code> → <code>reply.stop_reason</code>), so the fake replies look like the SDK's response objects without importing the SDK.",
+  4: "<b>Limit:</b> at most 2 rounds where tools are allowed. The loop below runs <code>MAX_ROUNDS + 1</code> calls: 2 with tools, then 1 forced final answer. Your real analysis loop uses the query budget plus a few extra rounds.",
+  7: "The tool's implementation: a normal function whose parameter names match the tool's input schema. In the real agent this would call VizQL Data Service.",
+  8: "Rejects any field that isn't in this fake datasource. <code>not in (\"Region\", \"Category\")</code> checks membership in a tuple of the two allowed names.",
+  9: "<code>raise ValueError(...)</code> throws an exception, as a real VDS call would on a bad field. The <code>f\"...{dimension}\"</code> f-string puts the bad name into the message, so the model can read what went wrong.",
+  10: "Returns one fake row as a JSON string: the dimension's member and a number. <code>211_000</code> is 211000; the <code>_</code> is only a digit separator.",
+  13: "<code>run_tool</code> turns one <code>tool_use</code> block into one <code>tool_result</code> block. This is the <b>tool errors</b> job from section 2.",
+  14: "The fields every result needs: <code>\"type\": \"tool_result\"</code>, and <code>\"tool_use_id\"</code> copied from the call's <code>id</code>, so the model can match result to request.",
+  15: "<code>try:</code> runs the tool and catches any exception it raises, instead of letting it end the whole request.",
+  16: "Runs the tool with the model's arguments (<code>**call.input</code> spreads the dict into keyword arguments). <code>result | {...}</code> merges two dicts (Python 3.9+) into a new one that adds <code>\"content\"</code>.",
+  17: "<code>except Exception as error:</code> catches any ordinary exception and names it <code>error</code>.",
+  18: "Sends the error back <em>as the result</em> of that call: <code>str(error)</code> is the message, and <code>\"is_error\": True</code> tells the model the call failed, so it can try another field. This is what the Tool Runner does for you.",
+  21: "<code>call_model</code>: one model call, plus the two checks that must happen before anything reads the reply.",
+  22: "<code>allow_tools</code> is <code>True</code> for rounds 0 and 1 (<code>round_number &lt; MAX_ROUNDS</code>), and <code>False</code> on the last round.",
+  23: "Calls the model with the history and a <code>tool_choice</code>: <code>{\"type\": \"auto\"}</code> lets the model decide whether to call a tool; <code>{\"type\": \"none\"}</code> forbids tool calls, so it must answer. The real API's <code>tool_choice</code> takes these same values. Note: current Opus and Sonnet models reject the forced values <code>any</code> and <code>tool</code>; <code>auto</code> and <code>none</code> still work.",
+  24: "<code>stop_reason == \"max_tokens\"</code> means the reply hit its length cap and was cut off mid-answer…",
+  25: "…so raise instead of returning half an answer as if it were complete. On models that think, the thinking also counts toward <code>max_tokens</code>, so the fix is a larger cap or a lower <code>effort</code>.",
+  26: "Otherwise hand the reply back to the loop.",
+  29: "<code>final_text</code>: turns a finished reply into the text the user sees.",
+  30: "<code>stop_reason == \"refusal\"</code>: the model's safety classifiers declined the request (HTTP 200, not an error). The content may be empty…",
+  31: "…so return a fixed, safe message instead of an empty string. In production, the API's refusal fallbacks can also retry on another model automatically.",
+  32: "Returns the first <code>text</code> block. <code>next(...)</code> takes the first match from the generator. Replies can hold other blocks (<code>thinking</code>, <code>tool_use</code>), so the code filters by <code>block.type</code> and doesn't assume <code>content[0]</code> is text.",
+  35: "<code>run_agent</code>: the loop itself, now with a hard limit.",
+  36: "The history starts as one user message. The API is stateless, so this list is the agent's whole memory and is sent again on every call.",
+  37: "<code>for round_number in range(MAX_ROUNDS + 1)</code>: rounds 0, 1, 2. A <code>for</code> over a range, not <code>while True</code>, so the loop <em>can't</em> run forever.",
+  38: "One model call through <code>call_model</code>, which already checked <code>max_tokens</code>.",
+  39: "Appends the model's <em>whole</em> reply unchanged. With thinking models this matters: thinking blocks must go back exactly as they came, before their <code>tool_use</code> blocks. Your real harness does this right.",
+  40: "Any stop reason other than <code>tool_use</code> (<code>end_turn</code>, <code>refusal</code>, …) means the model is done…",
+  41: "…so return the final text.",
+  42: "Collects every <code>tool_use</code> block. One reply can ask for several calls at once.",
+  43: "Runs all of them and sends <b>all</b> results back in <b>one</b> <code>user</code> message. Splitting them across messages teaches the model to stop making parallel calls.",
+  44: "Reached only if the model asked for a tool on the last round, when tools were off. The real API won't do that with <code>tool_choice: none</code>, but a harness should fail loudly instead of returning <code>None</code>.",
+  47: "A comment line. Everything below is test scaffolding, not part of the harness.",
+  49: "<code>scripted(*replies)</code> builds a fake model. <code>*replies</code> collects any number of prepared replies into a tuple.",
+  50: "The fake model has the same signature the harness uses: <code>model(messages, tool_choice)</code>.",
+  51: "Records which <code>tool_choice</code> each call got (<code>\"auto\"</code> or <code>\"none\"</code>), so a check can assert the last round turned tools off.",
+  52: "Keeps a reference to the history list, so a check can look inside what was sent, for example the <code>is_error</code> flag.",
+  53: "Returns the next scripted reply: the first call gets <code>replies[0]</code>, the second <code>replies[1]</code>, and so on.",
+  54: "Functions are objects in Python, so they can carry attributes. <code>model.choices</code> starts as an empty list.",
+  55: "Returns the fake model to the check.",
+  58: "<code>asks_tool(dimension)</code> builds a reply in which the model asks for <code>query_datasource</code>.",
+  59: "A fake <code>tool_use</code> block: <code>type</code>, an <code>id</code> the result must echo, and the tool's <code>name</code>…",
+  60: "…and the <code>input</code> dict, shaped by the tool's schema: a dimension and the measure <code>SUM(Sales)</code>.",
+  61: "Wraps it in a reply with <code>stop_reason=\"tool_use\"</code>, as the real API does.",
+  64: "<code>says(text, stop_reason)</code> builds a reply with one text block. The stop reason defaults to <code>\"end_turn\"</code>; checks override it with <code>refusal</code> or <code>max_tokens</code>.",
+  65: "A reply object holding a list with one <code>text</code> block.",
+  68: "Check 1, the happy path: one tool call, then an answer.",
+  69: "Script: first reply asks for Region, second says the answer.",
+  70: "<code>assert</code> raises <code>AssertionError</code> if the condition is false. Here: the agent returns exactly the scripted answer.",
+  73: "Check 2: a tool error goes back to the model as <code>is_error</code> instead of crashing.",
+  74: "Script: the model asks for <code>Country</code>, which the fake tool rejects, then answers.",
+  75: "Runs the agent. Without the <code>except</code> branch this line would raise <code>ValueError</code>.",
+  76: "<code>model.messages[2]</code> is the third message (user, assistant, tool results). <code>[\"content\"][0]</code> is the first tool result. <code>.get(\"is_error\")</code> returns <code>None</code> if the key is missing, so the check fails cleanly.",
+  79: "Check 3: after <code>MAX_ROUNDS</code> rounds with tools, the last call turns tools off.",
+  80: "Script: the model wants a tool twice, then answers.",
+  81: "Runs the agent.",
+  82: "The recorded choices must be <code>auto</code>, <code>auto</code>, then <code>none</code>.",
+  85: "Check 4: a refusal becomes a safe message, not an empty string.",
+  86: "Script: a refusal with empty text, set through the <code>stop_reason</code> keyword.",
+  87: "<code>.startswith(\"Sorry\")</code> checks the beginning of the returned string.",
+  90: "Check 5: a reply cut off at <code>max_tokens</code> must not reach the user.",
+  91: "Script: a half-written answer with <code>stop_reason=\"max_tokens\"</code>.",
+  92: "<code>try:</code> the agent should raise here…",
+  93: "…when it runs the question.",
+  94: "<code>except RuntimeError:</code> the expected exception from <code>call_model</code>…",
+  95: "…so the check passes by returning normally.",
+  96: "If no exception came, the harness returned a cut-off answer, so the check fails with a clear message.",
+  99: "Standard guard: runs only when you execute this file directly.",
+  100: "Finds every function whose name starts with <code>check_</code>. <code>globals()</code> is the dict of everything defined in this file; <code>list(...)</code> takes a snapshot of it before looping.",
+  101: "Runs each check in the order they're defined.",
+  102: "<code>try:</code> one failing check shouldn't stop the others.",
+  103: "Runs the check. If no assertion fails…",
+  104: "…prints <code>PASS</code> and the function's name (<code>__name__</code>).",
+  105: "Any exception (a failed <code>assert</code> or an error from the harness) is caught…",
+  106: "…and printed as <code>FAIL</code> with the exception's type and message: the feedback you use in the break-it experiments."
+});
+
+YamlExplain.mount(document.getElementById("yx-sdk"), `
+import json
+from typing import Literal
+
+import anthropic
+from anthropic import beta_tool
+from pydantic import BaseModel
+
+client = anthropic.Anthropic()
+MODEL = "claude-opus-5-5"
+Dimension = Literal["Region", "Category"]
+Measure = Literal["SUM(Sales)", "SUM(Profit)"]
+
+
+class Query(BaseModel):
+    dimension: Dimension
+    measure: Measure
+    descending: bool
+
+
+def generate_query(question):
+    response = client.messages.parse(
+        model=MODEL, max_tokens=16000,
+        system="Turn the question into one query on the Superstore datasource.",
+        messages=[{"role": "user", "content": question}],
+        output_format=Query,
+    )
+    return response.parsed_output
+
+
+@beta_tool
+def query_datasource(dimension: Dimension, measure: Measure) -> str:
+    """Run a query on the Superstore datasource. Returns rows as JSON.
+
+    Args:
+        dimension: The field to group by.
+        measure: The aggregated measure to compute.
+    """
+    members = {"Region": ["East", "West", "Central", "South"], "Category": ["Technology", "Furniture"]}
+    return json.dumps([{dimension: name, measure: 100_000 + 37_000 * i} for i, name in enumerate(members[dimension])])
+
+
+def run_agent(question):
+    runner = client.beta.messages.tool_runner(
+        model=MODEL, max_tokens=16000, max_iterations=5, thread=False,
+        system="You answer questions about the Superstore datasource. Use the query tool for any number.",
+        tools=[query_datasource],
+        messages=[{"role": "user", "content": question}],
+    )
+    final = runner.until_done()
+    return next(block.text for block in final.content if block.type == "text")
+
+
+if __name__ == "__main__":
+    print(generate_query("Which category is least profitable?"))
+    print(run_agent("Which region sells the most, and by how much over the lowest?"))
+`, {
+  1: "Imports <code>json</code> so the tool can return its rows as a JSON string.",
+  2: "<code>Literal</code> from the standard <code>typing</code> module: a type that allows only the listed values. Both helpers below turn it into a JSON Schema <code>enum</code>.",
+  4: "Anthropic's Python SDK (2.x today, installed with <code>pip install anthropic</code>).",
+  5: "<code>beta_tool</code>: the decorator that turns a typed Python function into a tool for the Tool Runner.",
+  6: "<code>BaseModel</code> from Pydantic: a class whose typed fields become a JSON Schema and are validated when data comes in.",
+  8: "The API client. With no arguments it reads <code>ANTHROPIC_API_KEY</code>. Swap in <code>anthropic.AnthropicBedrockMantle(aws_region=…)</code> or <code>anthropic.AnthropicVertex(project_id=…, region=…)</code> and the rest of the file is unchanged: that's provider portability <em>within</em> Claude.",
+  9: "One model ID for both parts. <code>claude-opus-5-5</code> thinks on every request; its <code>effort</code> defaults to <code>medium</code>.",
+  10: "<code>Dimension</code> may only be <code>\"Region\"</code> or <code>\"Category\"</code>.",
+  11: "<code>Measure</code> may only be one of the two aggregations, written the way Tableau writes them.",
+  14: "<code>Query</code>: the output contract of the query-generation step, as a Pydantic model. In your agent this would describe the VDS query (fields, filters).",
+  15: "Field <code>dimension</code>, typed <code>Dimension</code>, so the schema becomes <code>{\"type\": \"string\", \"enum\": [\"Region\", \"Category\"]}</code>.",
+  16: "Field <code>measure</code>, limited to the two measures.",
+  17: "Field <code>descending</code>, a boolean: sort high-to-low or not. Every field is required by default.",
+  20: "<code>generate_query</code>: a <b>workflow step</b>. One call, one validated object, no loop.",
+  21: "<code>client.messages.parse(...)</code> sends a normal Messages request with the schema attached as <code>output_config.format</code>, then validates the reply into a <code>Query</code>.",
+  22: "Model and output cap. <code>16000</code> leaves room for thinking plus a short JSON object.",
+  23: "The system prompt. There's no \"Return ONLY valid JSON\" line: the schema enforces the format, so the prompt only states the task.",
+  24: "The question as the only user message.",
+  25: "<code>output_format=Query</code>: the SDK turns the class into a JSON Schema (with <code>additionalProperties: false</code> and every field required) and sends it. Decoding is constrained to that schema, so the reply can't be invalid JSON or miss a field.",
+  26: "Closes the call.",
+  27: "<code>response.parsed_output</code> is already a <code>Query</code> instance. No <code>json.loads</code>, no text extraction.",
+  30: "<code>@beta_tool</code> wraps the function below: it reads the type hints and docstring to build the tool's <code>name</code>, <code>description</code> and <code>input_schema</code>, and validates the model's input before calling the function.",
+  31: "A normal typed function. <code>Dimension</code> and <code>Measure</code> become <code>enum</code>s in the input schema. <code>-&gt; str</code>: it returns text for the <code>tool_result</code>.",
+  32: "The docstring's first line becomes the tool's <code>description</code>, the text the model reads to decide when to use the tool.",
+  34: "<code>Args:</code> starts the per-parameter descriptions (Google docstring style).",
+  35: "Becomes the <code>description</code> of the <code>dimension</code> property in the schema.",
+  36: "Becomes the <code>description</code> of the <code>measure</code> property.",
+  37: "Closes the docstring.",
+  38: "Fake data: the members of each dimension, standing in for the datasource.",
+  39: "One row per member with a made-up value (100,000 + 37,000 × position), returned as a JSON string. South ends up highest, as in Lesson 1.",
+  42: "<code>run_agent</code>: the <b>agent loop</b>, run by the SDK instead of your code.",
+  43: "<code>client.beta.messages.tool_runner(...)</code>: the beta helper. It calls the model, runs any tool the model asks for, sends the results back and repeats. A raised exception goes back as <code>is_error: true</code>.",
+  44: "<code>max_iterations=5</code>: at most 5 model calls, the stopping condition. It stops there <em>without</em> forcing a final answer. <code>thread=False</code>: send the full history every turn, as your own loop does, instead of the 2.x default of a server-side message thread (section 5).",
+  45: "The system prompt, the same as Lesson 1's.",
+  46: "<code>tools=[query_datasource]</code>: the decorated function itself. The runner knows both its schema and how to call it.",
+  47: "The conversation so far: one user question.",
+  48: "Closes the call. Nothing has been sent yet: the runner is lazy.",
+  49: "<code>runner.until_done()</code> runs the loop to the end and returns the last assistant message. You can also iterate it (<code>for message in runner:</code>) to log or gate each turn.",
+  50: "Returns the first text block. If <code>max_iterations</code> ran out while the model still wanted a tool, there's no text block and <code>next</code> raises <code>StopIteration</code>. Try it with <code>max_iterations=1</code>.",
+  53: "Runs only when the file is executed directly.",
+  54: "The workflow step: prints a validated <code>Query</code>, e.g. <code>dimension='Category' measure='SUM(Profit)' descending=False</code>.",
+  55: "The agent loop: prints the model's final answer after one or more tool calls."
+});
+</script>
+</body>
+</html>

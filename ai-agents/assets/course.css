@@ -53,12 +53,17 @@ blockquote cite { display: block; font-style: normal; font-size: .8rem; margin-t
 .note { font-size: .82rem; color: var(--muted); display: block; margin: .4rem 0 1rem; }
 p .note { display: inline; margin: 0 0 0 .3em; }   /* inline citation on narrow screens */
 @media (min-width: 72rem) {
+  /* main reserves the 18rem margin the floated notes hang into, so the page never scrolls sideways */
+  main { max-width: calc(72rem + 18rem); padding-right: calc(18rem + 16px); }
   p .note, .note { display: block; float: right; clear: right; width: 15rem; margin-right: -18rem; margin-top: -.2rem; }
 }
 
 .callout { background: var(--panel); border-radius: 6px; padding: .8rem 1rem; margin: 1.2rem 0; }
 .callout.source { border-left: 4px solid var(--accent); }
 .callout.ask { border-left: 4px solid var(--good); }
+
+/* "With the customer" role-play stories */
+.story { border-left: 3px solid var(--rule); padding-left: 1rem; margin: 1rem 0; }
 
 figure { margin: 1.5rem 0; }
 figcaption { font-size: .8rem; color: var(--muted); font-style: italic; margin-top: .3rem; }
