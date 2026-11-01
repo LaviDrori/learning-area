@@ -17,7 +17,9 @@ const YamlExplain = (function () {
   .yx .ln[data-n]::before { content: "●"; position: absolute; left: .8rem; color: var(--accent); font-size: .7em; top: .25em; }
   .yx .ln[data-n] { cursor: pointer; }
   .yx .ln[data-n]:hover, .yx .ln.on { background: color-mix(in srgb, var(--accent) 14%, transparent); }
-  .yx .panel { font-size: .9rem; background: var(--panel); border-radius: 4px; padding: .8rem 1rem; align-self: start; }
+  .yx .panel { font-size: .9rem; background: var(--panel); border-radius: 4px; padding: .8rem 1rem; align-self: start;
+    position: sticky; bottom: .5rem; max-height: 45vh; overflow-y: auto; box-shadow: 0 -2px 8px rgba(0,0,0,.15); }
+  @media (min-width: 46rem) { .yx .panel { bottom: auto; top: 1rem; max-height: calc(100vh - 2rem); box-shadow: none; } }
   .yx .panel .hint { color: var(--muted); font-style: italic; }
   .yx .progress { font-family: var(--mono); font-size: .75rem; color: var(--muted); margin-top: .6rem; }
   @media print { .yx .panel { display: none; } }`;

@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Preparation and Fetch Stages</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body><main>
+<div class="crumbs">Jenkins · Lesson 3 · <a href="0002-reading-our-tableau-deploy-jenkinsfile.html">← Lesson 2</a> · <a href="../reference/glossary.html">Glossary &amp; Jenkinsfile cheat sheet</a></div>
+
+<h1>Preparation and Fetch: the First Two Stages</h1>
+<p class="subtitle">Validate, pull an image, run a container, check its exit code. ~25 minutes.</p>
+
+<div class="goal"><strong>Your win today:</strong> read stages 1 and 2 of the real pipeline line by line, and when a build is red, say from the <em>stage</em> and the <em>exit code</em> whether the cause is the <b>input</b> (what was typed into the trigger), the <b>tool</b> (the team's Python code) or the <b>infra</b> (Docker, registry, agents). This is mission goal 3: "open a failed build and tell whether it's my code, the data, or the pipeline."</div>
+
+<div class="callout"><b>Same rules as Lesson 2.</b> The excerpts are the real stages, lightly condensed, with secrets, hostnames and internal names replaced by <code>&lt;placeholders&gt;</code>. Line numbers are the excerpt's own.</div>
+
+<h2>0. Warm-up: guess first <span class="score"></span></h2>
+<div class="quiz" data-answer="1">
+  <p class="q">A step reads <code>sh(script: 'docker rm -f myapp', returnStatus: true)</code>. The command fails because no such container exists. What happens to the build?</p>
+  <button>The stage fails at once and the build turns red</button>
+  <button>Nothing, because the step just returns the exit code</button>
+  <button>Jenkins retries the command until it finally succeeds</button>
+  <p class="why">By default a failing <code>sh</code> "will cause the step to fail with an exception". With <code>returnStatus: true</code>, "the return value of the step will instead be the status code"<span class="note"><a href="https://www.jenkins.io/doc/pipeline/steps/workflow-durable-task-step/">jenkins.io, sh step</a>.</span>. The pipeline gets a number back and decides what to do. This pattern is all over the file.</p>
+</div>
+
+<h2>1. The two stages in one picture</h2>
+<table>
+<tr><th>#</th><th>Stage</th><th>Steps, in order</th><th>Fails when…</th></tr>
+<tr><td>1</td><td>Preparation <br><small>15 min limit</small></td><td>Validate <code>REPORT_FOLDER</code> → label the build → registry login → <code>docker pull</code></td><td>Input missing, image tag unknown, registry login rejected</td></tr>
+<tr><td>2</td><td>Fetch Workbook <br><small>30 min limit</small></td><td>Remove old container → <code>docker run … --action get_file</code> → check exit code</td><td>The container exits non-zero for any reason</td></tr>
+</table>
+<p>The key idea: <b>the pipeline itself does almost no real work.</b> The Tableau logic lives in a Python tool inside a Docker image. Jenkins pulls that image, runs it with the right arguments, and watches the exit code. So most red builds in stage 2 are not Jenkins problems.</p>
+
+<h2>2. Stage 1: Preparation</h2>
+<div id="yx-prep"></div>
+<p class="note">Click each ●. Watch lines 5 to 7: they show how a stage hands information to the next one.</p>
+
+<h2>3. Stage 2: Fetch Workbook from Tableau</h2>
+<p>Three Docker flags need explaining first, all from the <a href="https://docs.docker.com/reference/cli/docker/container/run/">docker run reference</a>: <code>--name</code> gives the container a fixed name. <code>-e VAR=value</code> sets an environment variable inside it. <code>-v host:container</code> bind-mounts a host folder into it. Anything written <em>after</em> the image name (<code>IMAGE [COMMAND] [ARG...]</code>) is not for Docker: it's the command and arguments for the container.</p>
+<div id="yx-fetch"></div>
+<p class="note">Lines 15 to 17 are worth a second look: they hold two real suggestions you could make.</p>
+
+<h2>4. What the exit code tells you</h2>
+<p>Line 20 compares an exit code to zero. Where does the number come from? The Docker docs: <code>125</code> means "the error is with Docker daemon itself", <code>126</code> "the specified contained command can't be invoked", <code>127</code> "the contained command can't be found", and "any exit code other than 125, 126, and 127 represent the exit code of the provided container command"<span class="note"><a href="https://docs.docker.com/engine/containers/run/">Docker docs, Exit status</a>.</span>. That gives you a triage table:</p>
+<table>
+<tr><th>You see in the console…</th><th>Likely cause</th><th>Whose problem</th></tr>
+<tr><td><code>REPORT_FOLDER parameter is REQUIRED…</code></td><td>The trigger didn't pass the folder</td><td><b>Input</b>: whoever or whatever triggered it</td></tr>
+<tr><td>Failure in <code>docker pull</code> (tag not found)</td><td>A <code>DOCKER_TAG</code> that doesn't exist in the registry</td><td><b>Input</b>, or the image wasn't published</td></tr>
+<tr><td>Failure in registry login or pull (unauthorised)</td><td>The login credential is wrong or expired</td><td><b>Infra</b>: DevOps</td></tr>
+<tr><td><code>…exit code 1…</code> (or other small number) from <code>get_file</code></td><td>The Python tool ran and failed: bad workbook name, Tableau error, bad token</td><td><b>Tool or input</b>: read the container's own output just above the error line</td></tr>
+<tr><td><code>…exit code 125</code>, <code>126</code> or <code>127</code></td><td>Docker couldn't start the command at all</td><td><b>Infra or image</b>: DevOps</td></tr>
+<tr><td>"Waiting for next available executor"</td><td>No free agent with the label</td><td><b>Infra</b>: nothing has run yet</td></tr>
+</table>
+<p class="note">Exact message wording differs by Docker version; learn the pattern (which stage, which exit code), not the strings.</p>
+
+<h2>5. Two suggestions this code earns you</h2>
+<div class="callout"><b>1. The token is pasted into the command.</b> Line 15 of the Fetch excerpt writes <code>--token ${TOKEN}</code> inside a double-quoted Groovy string. The Jenkins docs say plainly: "Groovy string interpolation should <b>never</b> be used with credentials", and recommend single-quoted <code>sh</code> so the <em>shell</em> expands the variable<span class="note"><a href="https://www.jenkins.io/doc/book/pipeline/jenkinsfile/">jenkins.io, Using a Jenkinsfile</a>; <a href="https://www.jenkins.io/doc/pipeline/steps/credentials-binding/">credentials-binding step</a>.</span>. Jenkins hides the value as <code>****</code> in the log, but with interpolation the real token is part of the command that other processes on the agent can list. A fix needs the Python tool to read the token from an environment variable instead of a flag, so it's a DevOps and tool-owner conversation.</div>
+<div class="callout"><b>2. Free-text parameters flow into a shell command.</b> Lines 16 and 17 wrap <code>WORKBOOK_NAME</code> and <code>REPORT_FOLDER</code> in single quotes, which protects spaces but not a value that itself contains a <code>'</code>. Anyone who can start the build controls those strings. The same docs say to always send "a literal command string" to <code>sh</code>. A cheap guard: validate both against an allowed pattern (like the folder check in Preparation), or make <code>REPORT_FOLDER</code> a <code>choice</code> parameter.</div>
+
+<hr>
+
+<h2>6. Check yourself <span class="score"></span></h2>
+
+<div class="quiz" data-answer="0">
+  <p class="q">Stage 2 fails with <em>"Python script failed during get_file with exit code 125"</em>. What's the most useful first reading?</p>
+  <button>Docker could not start the container, so it's likely infra</button>
+  <button>The Python tool found the workbook and then crashed</button>
+  <button>Tableau rejected the token that Jenkins passed along</button>
+  <p class="why">Docker reserves <code>125</code>, <code>126</code> and <code>127</code> for its own failures to start the command. A tool failure would normally show another number. So this is a question for DevOps about the image or daemon, not for the tool's owner.</p>
+</div>
+
+<div class="quiz" data-answer="2">
+  <p class="q">The <code>docker run</code> in the Fetch stage has no <code>--rm</code>. What does that make possible later?</p>
+  <button>Stage 4 can reuse the same running container live</button>
+  <button>Jenkins keeps a build log inside that container</button>
+  <button>Stage 3 can copy files out of the stopped container</button>
+  <p class="why">Without <code>--rm</code> ("automatically remove the container … when it exits") the stopped container stays on the agent. Stage 3 runs <code>docker cp</code> against it to pull out <code>output.txt</code> and the workbook. That's why the <code>post</code> block removes it at the end.</p>
+</div>
+
+<div class="quiz" data-answer="1">
+  <p class="q">Why does stage 2 run <code>docker rm -f &lt;name&gt; || true</code> before <code>docker run --name &lt;name&gt;</code>?</p>
+  <button>To free disk space by deleting the old image first</button>
+  <button>A leftover container with that name would block the run</button>
+  <button>To stop Docker from printing warnings about the old tag</button>
+  <p class="why">Container names must be unique on a host. A container left by a previous (maybe crashed) build would make <code>docker run --name</code> fail. <code>-f</code> forces removal even if it's still running, and <code>|| true</code> means "no such container" isn't an error.</p>
+</div>
+
+<div class="quiz" data-answer="0">
+  <p class="q">Stage 1 sets <code>env.appVersion = version</code> although <code>version</code> is already a variable. Why?</p>
+  <button>Stage 2 can read it, while the local variable is gone</button>
+  <button>Jenkins refuses to read any parameter inside stage 2</button>
+  <button>Groovy variables cannot hold text longer than one line</button>
+  <p class="why"><code>def version</code> only lives inside Stage 1's <code>script</code> block. Values stored on <code>env</code> survive to later stages. Stage 2 reads <code>env.appVersion ?: params.DOCKER_TAG</code>, with the parameter as a fallback.</p>
+</div>
+
+<div class="quiz" data-answer="2">
+  <p class="q">A teammate asks for <code>--token ${TOKEN}</code> to stay as it is, because "Jenkins masks it in the log." What's the best reply?</p>
+  <button>Fine, since masking fully protects the token everywhere</button>
+  <button>Fine, since the token is stored in a Jenkins credential</button>
+  <button>Masking only hides log text, so avoid interpolating the secret</button>
+  <p class="why">Masking is best-effort and only covers the <em>log</em>. With Groovy interpolation the real value is placed into the command itself. The docs advise a single-quoted <code>sh</code> and letting the shell expand the variable.</p>
+</div>
+
+<div class="quiz" data-answer="1">
+  <p class="q">The console shows <em>"…get_file with exit code 1…"</em>. Where do you look next?</p>
+  <button>The controller's system log, in the Jenkins admin pages</button>
+  <button>The container's own output printed just above that line</button>
+  <button>The Jenkinsfile's <code>post</code> block at the bottom</button>
+  <p class="why">The Python tool's messages (workbook not found, authentication failed…) are printed to the console while <code>docker run</code> executes. The <code>error(…)</code> line only reports the exit code <em>after</em> that. Read upward from the error.</p>
+</div>
+
+<hr>
+
+<div class="callout source"><b>Primary source, read this next (~10 min):</b> <a href="https://docs.docker.com/engine/containers/run/">Docker docs, Running containers</a>: the "Exit status" section, then the flags you saw (<code>--name</code>, <code>-e</code>, <code>-v</code>, <code>--rm</code>) in the <a href="https://docs.docker.com/reference/cli/docker/container/run/">docker run reference</a>. For the quoting rule: <a href="https://www.jenkins.io/doc/book/pipeline/jenkinsfile/">Using a Jenkinsfile</a>, the credentials section.</div>
+
+<div class="callout ask"><b>Questions for DevOps (copy and paste):</b> (1) "The image comes from the prod registry but the container runs with <code>ENV=preprod</code>. Is that intended?" (2) "Can the tool read the Tableau token from an environment variable instead of <code>--token</code>?" (3) "What does <code>fnDockerLogin</code> do with the name we pass it?" <b>Questions for me:</b> <em>"what is a bind mount?"</em>, <em>"what's the difference between <code>sh</code> with single and double quotes?"</em>, <em>"what does <code>|| true</code> mean?"</em></div>
+
+<div class="next"><a href="0002-reading-our-tableau-deploy-jenkinsfile.html">← Lesson 2</a><span>Next: Commit to Git, the stage that pushes and merges →</span></div>
+</main>
+<script src="../assets/yaml-explain.js"></script>
+<script>
+YamlExplain.mount(document.getElementById("yx-prep"), `
+stage('Preparation') {
+    steps {
+        timeout(time: 15, unit: 'MINUTES') {
+            script {
+                env.CURRENT_STAGE_NAME = 'Preparation'
+                def version = params.DOCKER_TAG
+                env.appVersion = version
+                if (!params.REPORT_FOLDER || params.REPORT_FOLDER.trim().isEmpty()) {
+                    def errorMsg = "REPORT_FOLDER parameter is REQUIRED but was not provided. …"
+                    env.HARMONY_NOTIFY_SCENARIO = 'failure'
+                    env.HARMONY_NOTIFY_ADDITIONAL_INFO = "Folder validation failed: \${errorMsg}"
+                    error("ERROR: \${errorMsg}")
+                }
+                wrap([$class: 'BuildUser']) {
+                    def reportFolder = params.REPORT_FOLDER.trim()
+                    currentBuild.description = "\${version}\\nTicket: \${params.TICKET_NUMBER}\\nFolder: \${reportFolder}\\n\${BUILD_USER_EMAIL}"
+                }
+                fnDockerLogin("<registry-login-name>")
+                sh """
+                    echo "Pulling image \${applicationName}:\${version}..."
+                    docker pull \${DOCKER_REGISTRY_PROD}/\${applicationName}:\${version}
+                """
+                echo "Application \${applicationName} version \${version} successfully prepared"
+            }
+        }
+    }
+}
+`, {
+  1: "<b>stage('Preparation') {</b>: stage 1. The name in quotes is the label on its box in the build UI and in the <code>CURRENT_STAGE_NAME</code> message.",
+  2: "<b>steps {</b>: the container for the stage's actual work (a Declarative stage must have <code>steps</code>).",
+  3: "<b>timeout(time: 15, unit: 'MINUTES') {</b>: a step that wraps everything inside it: if it runs longer than 15 minutes, Jenkins aborts it and the stage fails. A hung <code>docker pull</code> can't block the job (and the one-at-a-time lock) for the full 60 minutes.",
+  4: "<b>script {</b>: an escape hatch. Declarative pipelines don't allow variables, <code>if</code> or <code>def</code> directly inside <code>steps</code>. A <code>script</code> block lets you write ordinary Groovy there.",
+  5: "<b>env.CURRENT_STAGE_NAME = 'Preparation'</b>: records which stage is running, on <code>env</code> so it survives across stages. If the build later fails, the <code>post { failure }</code> block reads it to tell Harmony where it broke.",
+  6: "<b>def version = params.DOCKER_TAG</b>: copies the <code>DOCKER_TAG</code> parameter into a local variable named <code>version</code>. <code>params.X</code> reads a build parameter. This variable only exists inside this <code>script</code> block.",
+  7: "<b>env.appVersion = version</b>: saves it on <code>env</code> so that <em>later stages</em> can read it. Stage 2 does <code>env.appVersion ?: params.DOCKER_TAG</code>. <code>env</code> values are always text.",
+  8: "<b>if (!params.REPORT_FOLDER || params.REPORT_FOLDER.trim().isEmpty()) {</b>: the fail-fast check. <code>!params.REPORT_FOLDER</code> is true when the value is null or empty. <code>||</code> means 'or'. <code>.trim()</code> strips spaces, and <code>.isEmpty()</code> then catches a value that was only spaces.",
+  9: "<b>def errorMsg = \"…\"</b>: a local variable holding the explanation shown to whoever triggered the build. The real text tells them to provide a folder name such as Finance or Operations.",
+  10: "<b>env.HARMONY_NOTIFY_SCENARIO = 'failure'</b>: tells the failure handler which kind of Harmony message to send. <code>'failure'</code> is one of the cases in <code>buildHarmonyMessage</code>, near the bottom of the file.",
+  11: "<b>env.HARMONY_NOTIFY_ADDITIONAL_INFO = \"…\${errorMsg}\"</b>: the extra text that will be appended to the Harmony message. <code>\${errorMsg}</code> pastes in the variable from line 9.",
+  12: "<b>error(\"ERROR: \${errorMsg}\")</b>: the <code>error</code> step stops the build right here and marks it failed, printing the message in the console. No login or pull happens. <code>post { failure }</code> still runs and notifies Harmony.",
+  14: "<b>wrap([$class: 'BuildUser']) {</b>: turns on the Build User plugin for the block, so <code>BUILD_USER_EMAIL</code> exists (it's empty outside a <code>wrap</code>).",
+  15: "<b>def reportFolder = params.REPORT_FOLDER.trim()</b>: the folder name with surrounding spaces removed, for display only.",
+  16: "<b>currentBuild.description = \"…\"</b>: sets the short text shown under the build in the Jenkins UI: version, ticket, folder and who started it. <code>currentBuild</code> is Jenkins' object for the running build, and <code>\\n</code> inside the text is a new line. A quick way to find 'which ticket was build #57?'.",
+  18: "<b>fnDockerLogin(\"&lt;registry-login-name&gt;\")</b>: a function from the shared library (<code>@Library</code>, Lesson 2) that logs the agent in to the Docker registry. The string selects which registry login to use. The function body isn't in this file: ask DevOps what it does.",
+  19: "<b>sh \"\"\"</b>: starts a multi-line shell script. Triple double quotes (<code>\"\"\"</code>) mean Groovy first replaces every <code>\${…}</code> with its value, and only then hands the finished text to the shell on the agent. With no <code>returnStatus</code>, a failing command fails the step and the stage.",
+  20: "<b>echo \"Pulling image \${applicationName}:\${version}...\"</b>: the shell's <code>echo</code> prints a progress line into the console log. <code>applicationName</code> comes from the <code>environment</code> block and <code>version</code> from line 6.",
+  21: "<b>docker pull \${DOCKER_REGISTRY_PROD}/\${applicationName}:\${version}</b>: downloads the image from the registry to this agent. The image name is <code>registry-host/app-name:tag</code>. If the tag doesn't exist, or the login failed, the command exits non-zero. Jenkins runs scripts with <code>-xe</code>, so it prints each command and stops at the first error, and the stage turns red.",
+  22: "<b>\"\"\"</b>: closes the shell script started on line 19.",
+  23: "<b>echo \"Application … successfully prepared\"</b>: a Groovy <code>echo</code> step: just a line in the console log, confirming the stage got to the end.",
+});
+
+YamlExplain.mount(document.getElementById("yx-fetch"), `
+stage('Fetch Workbook from Tableau') {
+    steps {
+        timeout(time: 30, unit: 'MINUTES') {
+            script {
+                env.CURRENT_STAGE_NAME = 'Fetch Workbook from Tableau'
+                def START_TIME = getStartTime()
+                def version = env.appVersion ?: params.DOCKER_TAG
+                sh(script: "docker rm -f \${applicationName} || true", returnStatus: true)
+                withCredentials([string(credentialsId: 'TABLEAU_TOKEN', variable: 'TOKEN')]) {
+                    def exitCode = sh(script: """
+                        docker run --name \${applicationName} \\
+                            -e ENV=preprod \\
+                            -v \${WORKSPACE}/data:/app/data \\
+                            \${DOCKER_REGISTRY_PROD}/\${applicationName}:\${version} \\
+                            --token \${TOKEN} \\
+                            --workbook_name '\${params.WORKBOOK_NAME}' \\
+                            --folder_name '\${params.REPORT_FOLDER}' \\
+                            --action get_file
+                    """, returnStatus: true)
+                    if (exitCode != SUCCESS_EXIT_CODE) {
+                        currentBuild.result = 'FAILURE'
+                        error("Python script failed during get_file with exit code \${exitCode} for Harmony ticket \${params.TICKET_NUMBER}")
+                    } else {
+                        deploymentOccurred = true
+                    }
+                }
+                float DURATION = getDuration(START_TIME)
+                echo "Fetch stage completed in \${DURATION}s for Harmony ticket \${params.TICKET_NUMBER}"
+            }
+        }
+    }
+}
+`, {
+  1: "<b>stage('Fetch Workbook from Tableau') {</b>: stage 2. It only runs if stage 1 passed.",
+  2: "<b>steps {</b>: the stage's work.",
+  3: "<b>timeout(time: 30, unit: 'MINUTES') {</b>: this stage gets 30 minutes, the longest of the four, because downloading a big workbook from Tableau can be slow.",
+  4: "<b>script {</b>: lets this stage use plain Groovy (variables, <code>if</code>).",
+  5: "<b>env.CURRENT_STAGE_NAME = '…'</b>: records the running stage for the failure message (same as Preparation).",
+  6: "<b>def START_TIME = getStartTime()</b>: calls a helper defined at the top of the file. It returns the current time in <em>milliseconds</em>, so the stage can measure how long it took on line 27.",
+  7: "<b>def version = env.appVersion ?: params.DOCKER_TAG</b>: <code>?:</code> (the 'Elvis' operator) means 'use the left side unless it is empty or null, otherwise the right'. It reads the version stage 1 saved, with the original parameter as a fallback.",
+  8: "<b>sh(script: \"docker rm -f \${applicationName} || true\", returnStatus: true)</b>: clean-up of any leftover container from an earlier run. <code>docker rm -f NAME</code> force-removes the container (even a running one). <code>|| true</code> is shell for 'if that failed, carry on as if it worked', and <code>returnStatus: true</code> tells Jenkins not to fail the step either. Needed because container names must be unique.",
+  9: "<b>withCredentials([string(credentialsId: 'TABLEAU_TOKEN', variable: 'TOKEN')]) {</b>: fetches the secret-text credential stored in Jenkins under the ID <code>TABLEAU_TOKEN</code> and exposes it as the variable <code>TOKEN</code> only inside this block. Jenkins masks the value as <code>****</code> in the log.",
+  10: "<b>def exitCode = sh(script: \"\"\"</b>: runs the shell script below and stores its <em>exit code</em> in <code>exitCode</code> (because of <code>returnStatus: true</code> on line 19), instead of failing the step on a non-zero code.",
+  11: "<b>docker run --name \${applicationName} \\</b>: starts a new container from an image. <code>--name</code> gives it a fixed name, so stage 3 can find it. There is deliberately no <code>--rm</code>, so the container stays after it exits and stage 3 can copy files out of it. The trailing <code>\\</code> continues the command on the next line.",
+  12: "<b>-e ENV=preprod \\</b>: sets the environment variable <code>ENV</code> to <code>preprod</code> inside the container. The tool presumably uses it to choose the pre-production Tableau environment, though the image comes from the <em>prod</em> registry. Worth confirming that this is intended.",
+  13: "<b>-v \${WORKSPACE}/data:/app/data \\</b>: a <em>bind mount</em>, <code>host-folder:container-folder</code>. The <code>data</code> folder in this build's workspace (<code>\${WORKSPACE}</code> is a Jenkins variable holding that path) appears as <code>/app/data</code> inside the container, so files the tool writes there land on the agent.",
+  14: "<b>\${DOCKER_REGISTRY_PROD}/\${applicationName}:\${version} \\</b>: the image to run: <code>registry-host/app-name:tag</code>. Everything <em>after</em> this on the command is not for Docker. It's the arguments handed to the program inside the container.",
+  15: "<b>--token \${TOKEN} \\</b>: passes the Tableau token to the tool. <b>Caution:</b> this script is a double-quoted Groovy string, so Groovy pastes the <em>real secret</em> into the command text before the shell runs. The Jenkins docs say never to do that. Masking hides it in the log only. Fix: a single-quoted <code>sh</code> plus a tool that reads the token from an environment variable.",
+  16: "<b>--workbook_name '\${params.WORKBOOK_NAME}' \\</b>: the workbook the user asked for. The single quotes keep names with spaces in one piece. <b>Caution:</b> the value is free text typed by whoever starts the build, so a name containing a <code>'</code> would break out of the quotes.",
+  17: "<b>--folder_name '\${params.REPORT_FOLDER}' \\</b>: the Tableau folder to search, passed the same way (and with the same caution). Stage 1 only checked that it's not empty.",
+  18: "<b>--action get_file</b>: the tool's mode. <code>get_file</code> means 'only download the workbook'. Stage 4 runs the same image again with <code>--action \${params.ACTION}</code>.",
+  19: "<b>\"\"\", returnStatus: true)</b>: ends the shell script and sets the option that makes <code>sh</code> return the exit code instead of throwing.",
+  20: "<b>if (exitCode != SUCCESS_EXIT_CODE) {</b>: compares the exit code with <code>0</code> (set at the top of the file). For <code>docker run</code>, 125, 126 and 127 mean Docker itself couldn't start the command. Any other number is the exit code of the program in the container.",
+  21: "<b>currentBuild.result = 'FAILURE'</b>: marks the build as failed. (The <code>error</code> on the next line does this anyway.)",
+  22: "<b>error(\"Python script failed during get_file with exit code \${exitCode} for Harmony ticket …\")</b>: stops the build with a message that includes the exit code and ticket. This is the line to search for in the console log, and the tool's own output is printed <em>above</em> it.",
+  23: "<b>} else {</b>: the success path: the exit code was <code>0</code>.",
+  24: "<b>deploymentOccurred = true</b>: flips the file-wide flag from Lesson 2's line 22. Stage 3's <code>when</code> checks it. (Despite its name, nothing is deployed yet. It means 'the file was fetched'.)",
+  27: "<b>float DURATION = getDuration(START_TIME)</b>: calls the other helper from the top of the file: now minus the start time, divided by 1000, so the result is in seconds.",
+  28: "<b>echo \"Fetch stage completed in \${DURATION}s …\"</b>: writes the timing to the console log. Useful when you ask 'is this stage getting slower?'.",
+});
+</script>
+<script src="../assets/quiz.js"></script>
+</body></html>
