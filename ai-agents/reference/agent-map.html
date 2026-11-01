@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Map</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body><main>
+<div class="crumbs">Lessons: <a href="../lessons/0001-an-agent-is-a-loop.html">1</a> · Reference: <a href="glossary.html">Glossary</a></div>
+<h1>Agent Map</h1>
+<p class="subtitle">Five boxes, the loop, and the "does data leave?" check, on one page.</p>
+
+<h2>Five boxes</h2>
+<table>
+<tr><th>Box</th><th>Question</th><th>Options</th><th>Your agents</th></tr>
+<tr><td><b>① Model</b></td><td>Which LLM?</td><td>Claude, Gemini, open weights</td><td>Tableau: Claude · HR: Gemini</td></tr>
+<tr><td><b>② Model access</b></td><td>Who serves it, under whose contract and region?</td><td>Anthropic API · Bedrock · Google Cloud (Agent Platform) · self-hosted (vLLM, Ollama)</td><td>cloud APIs, in all four deployments</td></tr>
+<tr><td><b>③ Harness</b></td><td>Who runs the loop and keeps state?</td><td>own loop · Tool Runner · Claude Agent SDK · ADK · LangGraph · Agent Runtime / Managed Agents</td><td>own loops (HR moved off ADK)</td></tr>
+<tr><td><b>④ Context &amp; tools</b></td><td>What does it see and do?</td><td>system + org prompt · metadata · docs in context / RAG · skills · tools</td><td>fields, descriptions, org prompt, VizQL · DDLs, Confluence, BigQuery</td></tr>
+<tr><td><b>⑤ Hosting</b></td><td>Where does your code run?</td><td>Render · Cloud Run · Agent Runtime · VM + Docker · customer K8s</td><td>the only box that differs between cloud and on-prem</td></tr>
+</table>
+<p class="note">Products that span boxes: Agent Platform (formerly Vertex AI) = ② + (via Agent Runtime, formerly Agent Engine) ③ ⑤. Claude Managed Agents = ③ ⑤. Ask "for which box?"</p>
+
+<h2>The loop</h2>
+<pre>messages = [user_question]                        # the API is stateless: you keep the history
+while True:
+    r = model(system, tools, messages)            # one Messages API call
+    messages.append(assistant: r.content)         # keep tool_use blocks in history
+    if r.stop_reason != "tool_use":               # end_turn / max_tokens / refusal / stop_sequence
+        return text_of(r)                         # check refusal & max_tokens in production
+    results = [run(call) for call in r.tool_use]  # YOUR code runs tools, never the model
+    messages.append(user: results)                # all results in ONE user message, matched by tool_use_id</pre>
+<p class="note">Source: <a href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/how-tool-use-works">How tool use works</a>. Runnable version: <a href="../exercises/0001_agent_loop.py">exercises/0001_agent_loop.py</a>.</p>
+
+<h2>"Does our data leave the network?"</h2>
+<table>
+<tr><th>Box ② is…</th><th>What leaves</th><th>Under whose contract</th></tr>
+<tr><td>Anthropic API (your account)</td><td>prompt, metadata, history, tool results</td><td>yours, with Anthropic</td></tr>
+<tr><td>Bedrock / Google Cloud in the <em>customer's</em> account</td><td>same, to their cloud</td><td>theirs, their IAM and region</td></tr>
+<tr><td>Open model served inside their network</td><td>nothing</td><td>n/a, but ① changes, and so does quality</td></tr>
+</table>
+<p class="note">Moving ⑤ on-prem changes none of these rows.</p>
+</main></body>
+</html>
