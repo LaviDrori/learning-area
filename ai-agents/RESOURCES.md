@@ -13,8 +13,16 @@ Checked 2026-11-01. Renames to watch: Anthropic docs moved to `platform.claude.c
   Client tools vs server tools, `tool_use` / `tool_result` blocks. Use for: tool mechanics.
 
 ### Harnesses and frameworks
-- [Docs: Claude Agent SDK overview](https://code.claude.com/docs/en/agent-sdk/overview)
-  "The same tools, agent loop, and context management that power Claude Code"; comparison table vs Client SDK (own loop or beta Tool Runner) vs Managed Agents. Use for: Lesson 2.
+- [Docs: Claude Agent SDK overview](https://code.claude.com/docs/en/agent-sdk/overview) · [Hosting the Agent SDK](https://code.claude.com/docs/en/agent-sdk/hosting)
+  "The same tools, agent loop, and context management that power Claude Code"; comparison table vs Client SDK (own loop or beta Tool Runner) vs Managed Agents. Hosting: a `claude` CLI subprocess per session, state on local disk, "1 GiB RAM, 5 GiB disk, and 1 CPU per agent" to start. Use for: Lesson 2.
+- [Docs: Tool runner (SDK)](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-runner)
+  Beta; "handles the agentic loop, error wrapping, and type safety"; exceptions → `is_error: true`; `max_iterations`; hooks (`generate_tool_call_response`, `append_messages`). Claude API, Bedrock, Google Cloud, Foundry. Use for: what an SDK harness takes off your hands. Primary source for Lesson 2. Note: SDK 2.x runs it over a server-side "message thread" by default (`thread=False` to opt out); not on the retention page yet (2026-11-01).
+- [Docs: Claude Managed Agents overview](https://platform.claude.com/docs/en/managed-agents/overview)
+  Beta; Anthropic runs the loop, sandbox cloud or self-hosted; "not currently eligible for Zero Data Retention or HIPAA"; Claude API, Claude Platform on AWS, Google Cloud (Anthropic managed) only. Use for: when a managed runtime fits, and when security rules it out.
+- [Docs: Structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs)
+  `output_config.format` + `strict: true`; "constrained decoding"; GA on every platform; `enum`/`anyOf`/`$ref` yes, recursion and numeric bounds no; first use of a schema compiles a grammar (cached 24 h). Use for: replacing "Return ONLY valid JSON".
+- [Pydantic AI](https://pydantic.dev/docs/ai/overview/) · [LiteLLM](https://docs.litellm.ai/docs/)
+  Maintained multi-provider layers: typed agent loop with validated output, evals, OTel (Pydantic AI); OpenAI-format SDK/proxy for 100+ providers (LiteLLM). Use for: replacing hand-written provider adapters, after an eval run.
 - [Google ADK](https://adk.dev/) · [ADK deploy](https://adk.dev/deploy/)
   Model-agnostic framework in Python/TS/Go/Java/Kotlin; deploys to Agent Runtime, Cloud Run, GKE or "any environment that supports container images". Use for: the HR agent's old harness.
 - [LangGraph overview](https://docs.langchain.com/oss/python/langgraph/overview)

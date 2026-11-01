@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Harness Chooser</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body><main>
+<div class="crumbs">Lessons: <a href="../lessons/0001-an-agent-is-a-loop.html">1</a> · <a href="../lessons/0002-who-owns-the-loop.html">2</a> · Reference: <a href="glossary.html">Glossary</a> · <a href="agent-map.html">Agent map</a></div>
+<h1>Harness Chooser</h1>
+<p class="subtitle">Box ③ on one page: workflow or agent, what a harness owns, seven options, and the SDK snippets. Checked 2026-11-01.</p>
+
+<h2>1. Workflow or agent? Decide per step</h2>
+<table>
+<tr><th>If the step…</th><th>Build it as</th><th>Pattern</th></tr>
+<tr><td>has a known number of steps (one query, one classification)</td><td>workflow step: one call, validated output, your code continues</td><td>prompt chaining, routing</td></tr>
+<tr><td>needs an unknown number of steps, each depending on the last</td><td>agent loop <b>with a stopping condition</b> (round, token or query budget)</td><td>agent</td></tr>
+<tr><td>splits into independent parts</td><td>parallel calls, merged by code</td><td>parallelization, orchestrator-workers</td></tr>
+</table>
+<p class="note">"Workflows offer predictability and consistency for well-defined tasks, whereas agents are the better option when flexibility and model-driven decision-making are needed at scale." <a href="https://www.anthropic.com/engineering/building-effective-agents">Building effective agents</a></p>
+
+<h2>2. What a harness owns</h2>
+<table>
+<tr><th>Job</th><th>Minimum</th></tr>
+<tr><td>Stop reasons</td><td><code>tool_use</code> → run tools · <code>end_turn</code> → answer · <code>max_tokens</code> → raise, never return · <code>refusal</code> → safe message or fallback</td></tr>
+<tr><td>Tool errors</td><td>Exception → <code>tool_result</code> with <code>is_error: true</code>, same <code>tool_use_id</code></td></tr>
+<tr><td>Limits</td><td>Bounded loop + one final call with <code>tool_choice: {"type": "none"}</code>, tools still declared</td></tr>
+<tr><td>Conversation state</td><td>Know where history lives (your memory/DB, or the provider's servers)</td></tr>
+<tr><td>Context</td><td>Cache breakpoints (tools → system → messages), compaction, append-only history (thinking blocks back unchanged)</td></tr>
+<tr><td>Output contract</td><td>Structured outputs / strict tools, not "Return ONLY valid JSON"</td></tr>
+<tr><td>Model &amp; API churn</td><td>Track removed params (e.g. <code>temperature</code> → 400 from API version <code>2026-10-21</code>; forced <code>tool_choice</code> 400 on Opus 5.5 / Sonnet 5.5)</td></tr>
+<tr><td>Usage &amp; traces</td><td>Record <code>usage</code> per call, incl. cache reads/writes</td></tr>
+</table>
+
+<h2>3. Seven options</h2>
+<table>
+<tr><th>Option</th><th>Loop runs</th><th>Models</th><th>Pick it when</th><th>Avoid when</th></tr>
+<tr><td>Own loop</td><td>your code</td><td>any (you write adapters)</td><td>you need control or several vendors</td><td>you can't keep up with API changes</td></tr>
+<tr><td>Tool Runner (SDK, beta)</td><td>SDK, your process</td><td>Claude (API, Bedrock, Google Cloud, Foundry)</td><td>Claude-only custom-tool agent</td><td>you need a forced final answer at the limit (add it yourself)</td></tr>
+<tr><td>Claude Agent SDK</td><td><code>claude</code> subprocess, your container</td><td>Claude</td><td>the agent works in files and a shell</td><td>tools are plain HTTP calls; ~1 GiB RAM per session</td></tr>
+<tr><td>Claude Managed Agents (beta)</td><td>Anthropic</td><td>Claude (API, Platform on AWS, Google Cloud Anthropic-managed)</td><td>long, async, sandboxed work; scheduled runs</td><td>ZDR / HIPAA needed; Bedrock or Google-managed only</td></tr>
+<tr><td>Google ADK</td><td>framework, anywhere</td><td>any (Gemini first)</td><td>Google stack, multi-agent, built-in eval</td><td>a simple workflow you can read in plain code</td></tr>
+<tr><td>LangGraph</td><td>graph runtime, your process</td><td>any</td><td>long-running flows that pause, resume, need human approval</td><td>short request/response flows</td></tr>
+<tr><td>Agent Runtime (Google)</td><td>Google hosts ADK/LangGraph</td><td>per framework</td><td>you want managed hosting + Sessions on Google Cloud</td><td>it's hosting (⑤), not a harness choice</td></tr>
+</table>
+<p class="note">Multi-provider libraries replace adapters, not workflows: <a href="https://docs.litellm.ai/docs/">LiteLLM</a> (OpenAI-format SDK/proxy, 100+ providers) · <a href="https://pydantic.dev/docs/ai/overview/">Pydantic AI</a> (typed agent loop, validated output, evals, OTel).</p>
+
+<h2>4. Snippets (anthropic 2.x, Python)</h2>
+<h3>Workflow step with a guaranteed schema</h3>
+<pre>class Query(BaseModel):                         # Pydantic model = the output contract
+    dimension: Literal["Region", "Category"]    # Literal → JSON Schema enum
+    descending: bool                            # every field required by default
+
+r = client.messages.parse(                      # sends output_config.format = Query's schema
+    model="claude-opus-5-5", max_tokens=16000,  # thinking counts toward max_tokens
+    messages=[{"role": "user", "content": q}],  # no "Return ONLY JSON" needed
+    output_format=Query,                        # constrained decoding to this schema
+)
+query = r.parsed_output                         # a validated Query instance</pre>
+<h3>Strict tool (schema-valid arguments)</h3>
+<pre>{"name": "get_field_values",                     # tool name the model calls
+ "strict": True,                                 # top-level on the tool, not on tool_choice
+ "input_schema": {"type": "object",              # arguments are one JSON object
+   "properties": {"fields": {"type": "array", "items": {"type": "string"}}},  # list of captions
+   "required": ["fields"],                       # strict needs required…
+   "additionalProperties": False}}               # …and additionalProperties: false</pre>
+<h3>Tool Runner</h3>
+<pre>@beta_tool                                       # schema from type hints + docstring
+def query_datasource(dimension: Dim) -> str: ... # exceptions → is_error results
+
+runner = client.beta.messages.tool_runner(       # SDK runs the loop
+    model="claude-opus-5-5", max_tokens=16000,   # same request fields as messages.create
+    max_iterations=5,                            # stopping condition; no forced final answer
+    thread=False,                                # 2.x default is a server-side message thread
+    tools=[query_datasource], messages=msgs)     # decorated functions, not dicts
+final = runner.until_done()                      # last assistant message (check its stop_reason)</pre>
+<p class="note">Sources: <a href="https://platform.claude.com/docs/en/build-with-claude/structured-outputs">Structured outputs</a> · <a href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-runner">Tool runner</a> · <a href="https://code.claude.com/docs/en/agent-sdk/hosting">Agent SDK hosting</a> · <a href="https://platform.claude.com/docs/en/managed-agents/overview">Managed Agents</a>. Thread default: observed in <code>anthropic</code> 2.3.0's <code>tool_runner</code> docstring, not yet on the data-retention page.</p>
+</main></body>
+</html>
