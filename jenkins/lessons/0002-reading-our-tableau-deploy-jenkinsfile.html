@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reading Our Real Jenkinsfile</title>
+<link rel="stylesheet" href="../assets/course.css">
+<style>
+  .story { border-left: 3px solid var(--rule); padding-left: 1rem; margin: 1rem 0; }
+  .story ol { padding-left: 1.2rem; }
+</style>
+</head>
+<body><main>
+<div class="crumbs">Jenkins · Lesson 2 · <a href="0001-from-pull-request-to-green-check.html">← Lesson 1</a> · <a href="../reference/glossary.html">Glossary &amp; Jenkinsfile cheat sheet</a></div>
+
+<h1>Reading Our Real Jenkinsfile</h1>
+<p class="subtitle">The skeleton of the pipeline that moves a Tableau workbook into Git. ~25 minutes.</p>
+
+<div class="goal"><strong>Your win today:</strong> open the real pipeline (the <code>DataPlatformTableauVersion</code> one) and say, for every top-level block, <em>what it sets up, where it runs and what happens if it goes wrong</em>. Lesson 1's generic <code>orders-etl</code> file was a sketch. From here on, <b>this</b> file is the running example.</div>
+
+<div class="callout"><b>About the excerpt below.</b> It is the real file, condensed: the four stage bodies are folded to one line each (Lessons 3 to 5 open them), unimportant options are trimmed, and every secret, credential ID, webhook URL and internal host is replaced by a <code>&lt;placeholder&gt;</code>. Line numbers here are not the file's.</div>
+
+<h2>0. Warm-up: guess first <span class="score"></span></h2>
+<div class="quiz" data-answer="1">
+  <p class="q">This pipeline has no <code>cron</code> and no <code>when { branch … }</code>. It has six <code>parameters</code>. How is it most likely started?</p>
+  <button>Nightly by a timer, like a scheduled data job</button>
+  <button>On demand, by a person or a tool that supplies the parameter values</button>
+  <button>By a webhook every time someone pushes to a repo</button>
+  <p class="why">Parameters are inputs for a <em>specific</em> run (which workbook, which ticket, which folder). A timer or a push has nobody to supply them. The comments in the file mention a "Harmony workflow" passing the folder, so a Harmony request most likely triggers it. <b>That last part is my inference from the comments, so confirm it with DevOps.</b> The trigger itself is not in this file.</p>
+</div>
+
+<h2>1. What this pipeline is for</h2>
+<p>In plain words: someone files a Harmony ticket asking to version a Tableau workbook. The pipeline pulls a Docker image that contains the team's Python tool, runs it to <b>download the workbook from Tableau</b>, <b>commits it to GitHub through an auto-merged PR</b>, then runs a final <b>action</b> (<code>copy</code> by default). If the final action fails, it <b>reverts the commit</b>. Harmony is told the outcome either way.</p>
+<table>
+<tr><th>Stage</th><th>Does</th><th>Opens in</th></tr>
+<tr><td>Preparation</td><td>Validates inputs, logs in to the Docker registry, pulls the image</td><td>Lesson 3</td></tr>
+<tr><td>Fetch Workbook from Tableau</td><td>Runs the container with <code>--action get_file</code></td><td>Lesson 3</td></tr>
+<tr><td>Commit to Git</td><td>Copies the file out of the container, branch, commit, PR, merge</td><td>Lesson 4</td></tr>
+<tr><td>Execute Action</td><td>Runs the container again with <code>--action ${params.ACTION}</code>; rolls back on failure</td><td>Lesson 5</td></tr>
+</table>
+
+<h2>2. The skeleton, line by line</h2>
+<p>Notice the file mixes <b>two styles</b>. The code <em>inside</em> <code>pipeline { … }</code> is <b>Declarative</b> (structured, like Lesson 1). The code <em>outside</em> it, at the top and bottom, is plain <b>Scripted</b> Groovy: variables, <code>node</code>, helper functions. Declarative gives the readable skeleton, and Groovy fills in the logic the skeleton can't express.</p>
+<div id="yx-jenkinsfile"></div>
+<p class="note">Click any line marked ●. Try to explore all of them: the ones in <code>environment</code> hide the most important finding of this lesson.</p>
+
+<h2>3. Three things this file teaches that Lesson 1 didn't</h2>
+<ul>
+  <li><b>It checks out its own code.</b> <code>skipDefaultCheckout true</code> stops Jenkins from putting the repo in the workspace up front. The pipeline needs a <em>different</em> repo (the one it commits workbooks to), so it checks that out itself in stage 3, using a GitHub App credential.</li>
+  <li><b>One build at a time.</b> <code>disableConcurrentBuilds()</code> makes a second trigger <em>wait in the queue</em> until the running build ends. Two runs would otherwise fight over the same <code>main</code> branch and the same Docker container name.</li>
+  <li><b>State is passed through <code>env</code>.</b> Each stage records <code>env.CURRENT_STAGE_NAME</code>, and later stages set <code>env.GIT_PUSH_SUCCEEDED</code>. The <code>post { failure }</code> block reads them to tell Harmony <em>where</em> it broke. Plain Groovy variables like <code>deploymentOccurred</code> work too, but <code>env</code> is the safer way to share between stages.</li>
+</ul>
+
+<div class="callout"><b>Finding worth raising with DevOps.</b> Two lines in <code>environment</code> hold a real webhook URL and a real bearer token as plain text. The file's own <code>TODO</code> says "move to Jenkins credentials". Anyone who can read the repo (or this file) can post to Harmony as this pipeline. The fix is the Lesson 1 pattern: store them as credentials and read them with <code>credentials('id')</code>. Because the token has been copied out of Git into other places, it should also be <b>rotated</b>. This is exactly the "safer deploys" suggestion your mission asks for.</div>
+
+<hr>
+
+<h2>4. Check yourself <span class="score"></span></h2>
+
+<div class="quiz" data-answer="2">
+  <p class="q">Someone triggers the build and leaves <code>REPORT_FOLDER</code> empty. When does it fail?</p>
+  <button>At the very end, when it tries to commit to Git</button>
+  <button>Never: an empty folder just means the repo root</button>
+  <button>Immediately in Preparation, before logging in or pulling the image</button>
+  <p class="why">Preparation checks <code>REPORT_FOLDER</code> first and calls <code>error(…)</code>. That's <b>fail fast</b>: don't waste a Docker pull on a run that can't finish. It also sets <code>HARMONY_NOTIFY_*</code> so the failure message explains why.</p>
+</div>
+
+<div class="quiz" data-answer="0">
+  <p class="q">Two tickets trigger this job within the same minute. What happens to the second build?</p>
+  <button>It waits in the queue until the first finishes</button>
+  <button>It runs at the same time on a second executor</button>
+  <button>It cancels the first build and takes over</button>
+  <p class="why"><code>disableConcurrentBuilds()</code> allows one run at a time. The second sits in the queue (the "stuck in the queue" of Lesson 1, but by design). Quick Harmony requests can therefore look slow.</p>
+</div>
+
+<div class="quiz" data-answer="1">
+  <p class="q">Which lines in the <code>environment</code> block are real secrets sitting in Git?</p>
+  <button>The three credential IDs (<code>GIT_CREDENTIALS_ID</code> and friends)</button>
+  <button>The Harmony webhook URL and bearer token</button>
+  <button>All eight lines are secrets</button>
+  <p class="why">A credential ID is only a <em>name</em>; the secret stays encrypted on the controller. The bearer token is the secret itself, in plain text. <code>applicationName</code> and the registry host are ordinary config.</p>
+</div>
+
+<div class="quiz" data-answer="2">
+  <p class="q">The build page says "Waiting for next available executor". The file names the label twice (<code>node(…)</code> at the top, <code>agent { label … }</code> in the pipeline). What does that tell you?</p>
+  <button>The label is wrong, because it should only be named once</button>
+  <button>The job runs on two different agents at the same time</button>
+  <button>Both point to the same pool, so if its agents are busy or offline, the build waits</button>
+  <p class="why">Both use the same label, so setup and stages run on machines from the same pool. If that pool is offline or full, nothing starts. That's an <b>infra</b> cause, not a code bug, and it's the first thing to check on a build that never begins.</p>
+</div>
+
+<div class="quiz" data-answer="0">
+  <p class="q">A build fails in the middle. Where does the pipeline decide <em>what message</em> Harmony receives?</p>
+  <button>In <code>post { failure }</code>, which calls <code>handleGenericFailure()</code> using the <code>env</code> values stages recorded</button>
+  <button>In the Docker image, which sends it directly</button>
+  <button>Jenkins decides on its own, and nothing in the file affects it</button>
+  <p class="why"><code>post { failure }</code> runs after any failed stage. <code>handleGenericFailure()</code> (defined at the bottom of the file) reads <code>env.HARMONY_NOTIFY_ADDITIONAL_INFO</code> or builds a default from <code>CURRENT_STAGE_NAME</code>. That's why every stage sets <code>CURRENT_STAGE_NAME</code> first.</p>
+</div>
+
+<div class="quiz" data-answer="1">
+  <p class="q">Why are all six parameters declared as <code>string</code>, even <code>ACTION</code>, which only has a few valid values?</p>
+  <button>Jenkins can't make any other kind of parameter</button>
+  <button>It's the simplest type; a <code>choice</code> parameter would be a safer option</button>
+  <button>Strings are required for parameters read from <code>params</code></button>
+  <p class="why">Jenkins also has <code>choice</code>, <code>booleanParam</code> and more. With <code>string</code>, a typo in <code>ACTION</code> only fails when the container runs. A <code>choice</code> list would reject it up front. That's a small, concrete suggestion you could make.</p>
+</div>
+
+<hr>
+
+<div class="callout source"><b>Primary source, read this next (~10 min):</b> <a href="https://www.jenkins.io/doc/book/pipeline/syntax/">jenkins.io, Pipeline Syntax</a>: the <code>parameters</code>, <code>options</code> and <code>environment</code> sections. Then <a href="https://www.jenkins.io/doc/book/pipeline/shared-libraries/">Shared Libraries</a> for what <code>@Library</code> does.</div>
+
+<div class="callout ask"><b>Questions for DevOps (copy and paste):</b> (1) "What triggers this job: Harmony calling the Jenkins API, a webhook, or someone clicking Build?" (2) "Can we move the Harmony webhook URL and token into Jenkins credentials and rotate the token?" (3) "What's in <code>etoro-jenkins-library@0.0.12</code>? We use <code>fnDockerLogin</code> from it." <b>Questions for me:</b> <em>"what's the difference between <code>node</code> and <code>agent</code>?"</em>, <em>"what does <code>_</code> after <code>@Library</code> do?"</em></div>
+
+<div class="next"><a href="0001-from-pull-request-to-green-check.html">← Lesson 1</a><a href="0003-preparation-and-fetch-stages.html">Next: Preparation and Fetch, the first two stages →</a></div>
+</main>
+<script src="../assets/yaml-explain.js"></script>
+<script>
+YamlExplain.mount(document.getElementById("yx-jenkinsfile"), `
+@Library('etoro-jenkins-library@0.0.12') _
+
+import groovy.json.JsonOutput
+
+def SUCCESS_EXIT_CODE = 0
+def FAILURE_EXIT_CODE = 1
+def NO_CHANGES_EXIT_CODE = 100
+
+node('<linux-docker-agent>') {
+    properties([
+        buildDiscarder(logRotator(daysToKeepStr: '30', numToKeepStr: '100')),
+        [$class: 'RebuildSettings', autoRebuild: false, rebuildDisabled: false]
+    ])
+    wrap([$class: 'BuildUser']) {
+        USER_ID = "\${BUILD_USER_ID}"
+        if (USER_ID.contains("@")) {
+            (USER_ID, value) = USER_ID.split("@")
+        }
+    }
+}
+
+def deploymentOccurred = false
+
+pipeline {
+    parameters {
+        string(name: 'DOCKER_TAG', defaultValue: 'latest', description: '…')
+        string(name: 'TICKET_NUMBER', defaultValue: '0', description: '…')
+        string(name: 'WORKBOOK_NAME', defaultValue: '', description: '…')
+        string(name: 'COMMIT_MSG', defaultValue: '', description: '…')
+        string(name: 'ACTION', defaultValue: 'copy', description: '…')
+        string(name: 'REPORT_FOLDER', defaultValue: '', description: '…')
+    }
+    options {
+        skipDefaultCheckout true
+        timeout(time: 60, unit: 'MINUTES')
+        disableConcurrentBuilds()
+        ansiColor('xterm')
+    }
+    environment {
+        GIT_CREDENTIALS_ID = '<pat-credential-id>'
+        githubCredentials = '<github-app-credential-id>'
+        dockerCredentialsProd = '<docker-credential-id>'
+        applicationName = "dataplatformtableauversion"
+        githubRepositoryName = "DataPlatformTableauVersion"
+        DOCKER_REGISTRY_PROD = "<registry-host>"
+        HARMONY_WEBHOOK_URL = '<redacted-webhook-url>'
+        HARMONY_WEBHOOK_BEARER_TOKEN = '<redacted-token>'
+    }
+    agent { label "<linux-docker-agent>" }
+    stages {
+        stage('Preparation')                 { /* … */ }
+        stage('Fetch Workbook from Tableau') { /* … */ }
+        stage('Commit to Git')               { when { expression { return deploymentOccurred } } /* … */ }
+        stage('Execute Action')              { when { expression { return env.GIT_PUSH_SUCCEEDED == 'true' } } /* … */ }
+    }
+    post {
+        always  { /* remove the docker containers */ }
+        success { echo "Successfully processed Tableau workbook" }
+        failure { handleGenericFailure() }
+    }
+}
+`, {
+  1: "<b>@Library('etoro-jenkins-library@0.0.12') _</b>: loads a <em>shared library</em>, a repo of reusable pipeline code kept by DevOps. <code>etoro-jenkins-library</code> is its name as registered in Jenkins; <code>@0.0.12</code> pins the exact version, so a library change can't silently alter this pipeline until someone bumps the number. The lone <code>_</code> is a placeholder Groovy needs because an annotation must attach to something. This is where <code>fnDockerLogin</code> comes from (Lesson 7 covers libraries).",
+  3: "<b>import groovy.json.JsonOutput</b>: a normal Groovy import. It makes the <code>JsonOutput</code> class available; the file later uses it to turn a map into the JSON text posted to the Harmony webhook.",
+  5: "<b>def SUCCESS_EXIT_CODE = 0</b>: declares a Groovy variable. <code>def</code> = untyped variable. <code>0</code> is the universal 'command succeeded' exit code for shell commands.",
+  6: "<b>def FAILURE_EXIT_CODE = 1</b>: <code>1</code> is the conventional generic 'something went wrong' exit code.",
+  7: "<b>def NO_CHANGES_EXIT_CODE = 100</b>: a made-up code with a private meaning: 'nothing to commit'. The git script exits with <code>100</code> when the workbook is identical to what's in the repo, and the pipeline looks for exactly that number later to tell 'no changes' apart from a real error.",
+  9: "<b>node('&lt;linux-docker-agent&gt;') {</b>: a <em>Scripted</em>-style block: run what's inside on an agent that has this label (here, a Linux machine with Docker). It sits outside <code>pipeline {}</code>, so it runs first, as a quick setup step, before the pipeline proper starts. The real file has the actual label name.",
+  10: "<b>properties([</b>: sets <em>job-level</em> settings from code, so they live in Git instead of being clicked into the Jenkins UI. The list in <code>[ ]</code> holds one entry per setting.",
+  11: "<b>buildDiscarder(logRotator(daysToKeepStr: '30', numToKeepStr: '100'))</b>: housekeeping. <code>logRotator</code> deletes old builds: anything older than <code>30</code> days, and also anything beyond the newest <code>100</code>. Whichever limit is hit first applies. Old console logs are therefore not kept forever.",
+  12: "<b>[$class: 'RebuildSettings', autoRebuild: false, rebuildDisabled: false]</b>: configures the Rebuilder plugin, which adds a 'Rebuild' button that re-runs a build with the same parameters. <code>$class</code> names the plugin class. <code>rebuildDisabled: false</code> keeps the button enabled; <code>autoRebuild: false</code> means no automatic retry.",
+  14: "<b>wrap([$class: 'BuildUser']) {</b>: <code>wrap</code> runs the block with an extra feature switched on. The Build User plugin makes variables like <code>BUILD_USER_ID</code> and <code>BUILD_USER_EMAIL</code> exist inside it: who started this build.",
+  15: "<b>USER_ID = \"\${BUILD_USER_ID}\"</b>: copies the starter's Jenkins user ID into a script-wide variable (no <code>def</code>, so later code can see it). <code>\${…}</code> is Groovy string interpolation: it pastes the variable's value into the text.",
+  16: "<b>if (USER_ID.contains(\"@\")) {</b>: some user IDs are email addresses like <code>lavi@company.com</code>. This checks whether the ID has an <code>@</code> in it.",
+  17: "<b>(USER_ID, value) = USER_ID.split(\"@\")</b>: splits the text at the <code>@</code> into a list (<code>lavi</code>, <code>company.com</code>) and assigns the pieces to two variables at once. <code>USER_ID</code> keeps the part before the <code>@</code>, and <code>value</code> receives the domain and is never used.",
+  22: "<b>def deploymentOccurred = false</b>: a flag shared across stages, starting as <code>false</code>. Stage 2 flips it to <code>true</code> once the workbook is fetched, and stage 3's <code>when</code> checks it. Despite the name, it really means 'the file was fetched'. Nothing is deployed at that point.",
+  24: "<b>pipeline {</b>: the Declarative part starts here. Everything inside is the structured skeleton you know from Lesson 1.",
+  25: "<b>parameters {</b>: the inputs a person or tool must supply when starting a build. Jenkins shows them as a form ('Build with Parameters'). Inside the pipeline they're read as <code>params.NAME</code>.",
+  26: "<b>string(name: 'DOCKER_TAG', defaultValue: 'latest', …)</b>: a text parameter. <code>name</code> is how code refers to it. <code>defaultValue</code> is used when the caller gives nothing. <code>DOCKER_TAG</code> picks <em>which version</em> of the team's Docker image to run, and <code>latest</code> means 'newest', which can change underneath you.",
+  27: "<b>string(name: 'TICKET_NUMBER', defaultValue: '0', …)</b>: the Harmony ticket ID. <code>'0'</code> is the 'no ticket' value, and the helper functions treat <code>0</code> as 'don't notify Harmony'.",
+  28: "<b>string(name: 'WORKBOOK_NAME', defaultValue: '', …)</b>: which Tableau workbook to fetch. The empty default means there is no useful default, so the caller has to provide one.",
+  29: "<b>string(name: 'COMMIT_MSG', defaultValue: '', …)</b>: the text used for the Git commit and PR title.",
+  30: "<b>string(name: 'ACTION', defaultValue: 'copy', …)</b>: the final operation for the Docker tool to perform in stage 4. It's passed straight to <code>--action</code>. Only a few values make sense, yet it's a free-text <code>string</code>, so a typo only fails when the container runs.",
+  31: "<b>string(name: 'REPORT_FOLDER', defaultValue: '', …)</b>: the folder in the repo (Finance, Operations…) to commit into. Left empty on purpose, and Preparation rejects an empty value.",
+  33: "<b>options {</b>: pipeline-wide behaviour settings.",
+  34: "<b>skipDefaultCheckout true</b>: don't automatically check out the repo at the start. Without this, Jenkins would clone the <em>Jenkinsfile's own</em> repo into the workspace. This pipeline needs a different repo, so it does its own <code>checkout</code> in stage 3.",
+  35: "<b>timeout(time: 60, unit: 'MINUTES')</b>: abort the whole build if it runs longer than 60 minutes, so a hung step can't hold the one-at-a-time lock forever. Each stage also has its own smaller timeout (15, 30, 15 and 10 minutes).",
+  36: "<b>disableConcurrentBuilds()</b>: only one build of this job at a time. A second trigger waits in the queue until the first finishes. This protects the shared Git <code>main</code> branch and the fixed Docker container name.",
+  37: "<b>ansiColor('xterm')</b>: turns on colour in the console log, so the colour codes printed by tools show as colours. <code>xterm</code> is the colour scheme used for interpreting them.",
+  39: "<b>environment {</b>: variables that exist in every stage, readable in Groovy and as shell env vars.",
+  40: "<b>GIT_CREDENTIALS_ID = '&lt;pat-credential-id&gt;'</b>: not a secret. It's the <em>ID</em> (a name) of a username and personal-access-token credential stored on the controller. Stage 3 hands this ID to <code>withCredentials</code> to unlock it for Git and the <code>gh</code> CLI. The real file has a UUID here.",
+  41: "<b>githubCredentials = '&lt;github-app-credential-id&gt;'</b>: another ID, for a GitHub <em>App</em> credential. It's used for the <code>checkout</code> step. A different identity from the PAT above, with the different permissions.",
+  42: "<b>dockerCredentialsProd = '&lt;docker-credential-id&gt;'</b>: the ID of the credential for the production Docker registry. Defined here, though the file logs in through the library function <code>fnDockerLogin(\"prodEtoroAcr\")</code> instead.",
+  43: "<b>applicationName = \"dataplatformtableauversion\"</b>: the name of the Docker image <em>and</em> of the container. It appears in every <code>docker run</code>, <code>cp</code> and <code>rm</code>, so renaming it here renames it everywhere.",
+  44: "<b>githubRepositoryName = \"DataPlatformTableauVersion\"</b>: the GitHub repo the workbooks are committed to. It's pasted into the clone URL <code>https://github.com/eToro/…git</code>.",
+  45: "<b>DOCKER_REGISTRY_PROD = \"&lt;registry-host&gt;\"</b>: the hostname of the Azure Container Registry holding the image. Together with <code>applicationName</code> and the tag it forms the full image name: <code>registry/app:tag</code>.",
+  46: "<b>HARMONY_WEBHOOK_URL = '&lt;redacted-webhook-url&gt;'</b>: the address the pipeline posts results to. The real file has the actual URL in plain text, and the URL itself acts as part of the access control.",
+  47: "<b>HARMONY_WEBHOOK_BEARER_TOKEN = '&lt;redacted-token&gt;'</b>: <b>a real secret in plain text in Git.</b> A bearer token means whoever holds it is trusted. The file's <code>TODO</code> says to move it to Jenkins credentials. Fix: store it as a credential and use <code>credentials('id')</code> here, then rotate the token.",
+  49: "<b>agent { label \"&lt;linux-docker-agent&gt;\" }</b>: run the pipeline's stages on any agent carrying this label. The same label as line 9, so both parts run in the same pool of machines. If that pool is offline, the build waits in the queue.",
+  50: "<b>stages {</b>: the ordered list of stages. They run top to bottom, and the first failure skips the rest (the <code>post</code> block still runs).",
+  51: "<b>stage('Preparation')</b>: stage 1. Checks the inputs, logs in to the registry, pulls the Docker image. <code>/* … */</code> stands for the folded body (Lesson 3).",
+  52: "<b>stage('Fetch Workbook from Tableau')</b>: stage 2. Runs the container to download the workbook, and sets <code>deploymentOccurred = true</code> on success (Lesson 3).",
+  53: "<b>stage('Commit to Git') { when { expression { return deploymentOccurred } } … }</b>: stage 3. <code>when { expression { … } }</code> runs the stage only if the Groovy code inside returns <code>true</code>. Here it checks the flag from line 22. Commits the workbook through a PR (Lesson 4).",
+  54: "<b>stage('Execute Action') { when { expression { return env.GIT_PUSH_SUCCEEDED == 'true' } } … }</b>: stage 4. Runs only if stage 3 recorded that the push worked. <code>env</code> values are always <em>text</em>, hence the comparison to the string <code>'true'</code>, not the boolean. Runs the final action, and rolls Git back if it fails (Lesson 5).",
+  56: "<b>post {</b>: steps that run after all stages, grouped by outcome. They run even when a stage failed.",
+  57: "<b>always { … }</b>: runs whatever the result. Here it removes the <code>dataplatformtableauversion</code> and <code>-push</code> containers on the agent, so leftovers don't break the next build's <code>docker run --name</code>.",
+  58: "<b>success { echo \"…\" }</b>: runs only if every stage passed. <code>echo</code> just writes a line to the console log.",
+  59: "<b>failure { handleGenericFailure() }</b>: runs only if the build failed. It calls a helper function defined at the bottom of the file, which posts a failure message to Harmony using the <code>env</code> values the stages recorded.",
+});
+</script>
+<script src="../assets/quiz.js"></script>
+</body></html>

@@ -73,4 +73,21 @@
 <tr><td><code>BRANCH_NAME</code></td><td>Branch being built, e.g. <code>main</code></td></tr>
 <tr><td><code>CHANGE_ID</code></td><td>The change request ID, e.g. a pull request number</td></tr>
 </table>
+
+<h2>Triage: stage + exit code (Lesson 3)</h2>
+<table>
+<tr><td><code>sh 'cmd'</code></td><td>Non-zero exit fails the step. Jenkins runs it with <code>-xe</code> (print each command, stop at first error)</td></tr>
+<tr><td><code>sh(script: 'cmd', returnStatus: true)</code></td><td>Returns the exit code instead of failing. The pipeline decides what to do</td></tr>
+<tr><td><code>sh(script: 'cmd', returnStdout: true)</code></td><td>Returns the output text (use <code>.trim()</code>)</td></tr>
+<tr><td><code>docker run</code> exit <code>125 / 126 / 127</code></td><td>Docker daemon error / command can't be invoked / command not found → <b>infra or image</b></td></tr>
+<tr><td><code>docker run</code> any other code</td><td>The program inside the container exited with that code → <b>tool or input</b>; read the output above the error</td></tr>
+<tr><td><code>docker run --name N</code> / <code>-e K=V</code> / <code>-v host:ctr</code> / <code>--rm</code></td><td>Fixed container name / env var inside / bind-mount a folder / delete the container on exit</td></tr>
+<tr><td><code>docker run IMAGE a b c</code></td><td><code>a b c</code> are arguments for the program in the container, not for Docker</td></tr>
+<tr><td><code>cmd || true</code></td><td>Shell: if <code>cmd</code> fails, carry on as if it succeeded</td></tr>
+<tr><td><code>a ?: b</code></td><td>Groovy: <code>a</code> unless it's empty or null, else <code>b</code></td></tr>
+<tr><td><code>error('msg')</code></td><td>Stop the build now, mark it failed, print <code>msg</code></td></tr>
+<tr><td><code>timeout(time: N, unit: 'MINUTES') { … }</code></td><td>Abort the block (and fail the stage) after N minutes</td></tr>
+<tr><td><code>withCredentials([string(credentialsId: 'ID', variable: 'V')]) { … }</code></td><td><code>$V</code> holds the secret inside the block only; masked as <code>****</code> in the log</td></tr>
+<tr><td>Quoting rule for secrets</td><td>Double-quoted Groovy strings paste the value in <em>before</em> the shell runs. Never do that with credentials; use single quotes and let the shell expand <code>$V</code></td></tr>
+</table>
 </main></body></html>

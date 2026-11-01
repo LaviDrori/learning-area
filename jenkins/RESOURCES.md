@@ -19,6 +19,15 @@
 - [Plugin: GitHub Branch Source (plugins.jenkins.io)](https://plugins.jenkins.io/github-branch-source/)
   Multibranch/Organization Folder support for GitHub repos and PRs. Thin page; links to fuller CloudBees docs.
 
+- [Docs: Using a Jenkinsfile (jenkins.io)](https://www.jenkins.io/doc/book/pipeline/jenkinsfile/)
+  `env` and `params`, handling credentials, and the rule "Groovy string interpolation should never be used with credentials". Use for: reading `withCredentials` blocks and judging quoting.
+- [Steps: sh (jenkins.io)](https://www.jenkins.io/doc/pipeline/steps/workflow-durable-task-step/)
+  `returnStatus`, `returnStdout`, default failure on non-zero exit, default `-xe`. Use for: any `sh(...)` in a Jenkinsfile.
+- [Steps: credentials binding (jenkins.io)](https://www.jenkins.io/doc/pipeline/steps/credentials-binding/)
+  `withCredentials`, `string(...)` bindings, log masking and its limits. Use for: secrets in stages.
+- [Docs: docker run reference](https://docs.docker.com/reference/cli/docker/container/run/) and [Running containers: Exit status](https://docs.docker.com/engine/containers/run/)
+  `--name`, `-e`, `-v`, `--rm`, `IMAGE [COMMAND] [ARG...]`, and exit codes 125/126/127 vs the container's own code. Use for: triaging a red `docker run` stage. **Primary source for Lesson 3.**
+
 ## Wisdom (Communities)
 
 - [Jenkins Community forum (community.jenkins.io)](https://community.jenkins.io/)
